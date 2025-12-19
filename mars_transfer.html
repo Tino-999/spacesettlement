@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Earth → Mars Transfer (Concept Sim)</title>
+  <style>
+    html, body { margin:0; height:100%; background:#000; color:#fff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    canvas { display:block; width:100vw; height:100vh; }
+    .ui {
+      position:fixed; left:16px; top:16px; right:16px; max-width:720px;
+      background:rgba(0,0,0,0.55); border:1px solid rgba(255,255,255,0.12);
+      border-radius:14px; padding:12px 14px; backdrop-filter: blur(6px);
+    }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label { font-size:12px; opacity:0.8; letter-spacing:0.1em; text-transform:uppercase; }
+    input[type="range"] { width:180px; }
+    .pill { padding:6px 10px; border:1px solid rgba(255,255,255,0.14);
+      border-radius:999px; font-size:12px; opacity:0.85; }
+    button {
+      cursor:pointer; border-radius:999px; padding:8px 12px;
+      border:1px solid rgba(255,255,255,0.18);
+      background:rgba(255,255,255,0.06); color:#fff;
+      font-family: inherit; letter-spacing:0.12em; text-transform:uppercase; font-size:12px;
+    }
+    button:hover { background:rgba(255,255,255,0.09); }
+    .hint { opacity:0.6; font-size:12px; line-height:1.4; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="ui">
+    <div class="row">
+      <span class="pill" id="phasePill">PHASE: —</span>
+      <span class="pill" id="tPill">t: —</span>
+      <span class="pill" id="dvPill">Δv: —</span>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <label>Time warp</label>
+      <input id="warp" type="range" min="1" max="500" value="120" />
+      <span class="pill" id="warpVal">×120</span>
+
+      <label style="margin-left:10px">Phasing orbits</label>
+      <input id="loops" type="range" min="0" max="12" value="4" />
+      <span class="pill" id="loopsVal">4</span>
+
+      <label style="margin-left:10px">TMI burn angle</label>
+      <input id="burn" type="range" min="0" max="360" value="25" />
+      <span class="pill" id="burnVal">25°</span>
+
+      <button id="reset">RESET</button>
+      <button id="pause">PAUSE</button>
+    </div>
+
+    <div class="hint">
+      Konzept: Du parkst in LEO, wartest durch Phasing-Orbits auf das Startfenster und zündest dann TMI.
+      Danach coastest du auf einem Hohmann-Transfer bis zur Marsbahn (und „Capture“ wird als Orbit um Mars gezeigt).
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const phasePill = document.getElementById('phasePill');
+  const tPill = document.getElementById('tPill');
+  const dvPill = document.getElementById('dvPill');
+
+  const warp = document.getElementById('warp');
+  const loops = document.getElementById('loops');
+  const burn = document.getElementById('burn');
+  const warpVal = document.getElementById('warpVal');
+  const loopsVal = document.getElementById('loopsVal');
+  const burnVal = document.getElementById('burnVal');
+
+  const btnReset = document.getElementById('reset');
+  const btnPause = document.getElementById('pause');
+
+  // ====== World model (not physically exact; concept-accurate) ======
+  // Units: arbitrary "AU-ish" for heliocentric view; Earth orbit radius = 1.0
+  // Earth orbital period = 1.0 year -> angular rate = 2π per "year"
+  // Mars orbit radius = 1.524
+  // Transfer: Hohmann ellipse with perihelion at Earth (r1) and aphelion at Mars (r2)
+
+  const TAU = Math.PI * 2;
+
+  const world = {
+    paused: false,
+    time: 0, // in "years"
+    warp: 120, // sim speed multiplier
+    // scales
+    dpr: 1,
+    w: 0,
+    h: 0,
+    // celestial
+    sun: { x: 0, y: 0 },
+    rEarth: 1.0,
+    rMars: 1.524,
+    wEarth: TAU / 1.0,         // rad/year
+    wMars:  TAU / 1.8808,      // rad/year (approx)
+    // spacecraft state machine
+    phase: 'LEO', // LEO -> PHASING -> TMI -> TRANSFER -> MARS_CAPTURE
+    phaseCount: 0,
+    targetPhasingLoops: 4,
+    burnAngleDeg: 25,
+    // dv bookkeeping (conceptual)
+    dv: 0,
+    // local states
+    leo: { r: 0.09, ang: 0 }, // around Earth in heliocentric units (tiny)
+    // transfer parameterization
+    transfer: {
+      a: 0, e: 0,
+      theta: 0,       // true anomaly along transfer ellipse (0..π)
+      thetaRate: 0.7, // visual speed (not physical)
+      startTheta: 0,
+      endTheta: Math.PI
+    },
+    // Mars capture orbit around Mars
+    capture: { r: 0.06, ang: 0 }
+  };
+
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    world.dpr = dpr;
+    world.w = window.innerWidth;
+    world.h = window.innerHeight;
+    canvas.width = Math.floor(world.w * dpr);
+    canvas.height = Math.floor(world.h * dpr);
+    canvas.style.width = world.w + 'px';
+    canvas.style.height = world.h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize, { passive: true });
+  resize();
+
+  // Transfer orbit parameters (Hohmann)
+  function setTransferParams() {
+    const r1 = world.rEarth;
+    const r2 = world.rMars;
+    const a = (r1 + r2) / 2;
+    const e = (r2 - r1) / (r2 + r1);
+    world.transfer.a = a;
+    world.transfer.e = e;
+    world.transfer.theta = 0;
+  }
+  setTransferParams();
+
+  // UI bindings
+  function syncUI() {
+    world.warp = +warp.value;
+    world.targetPhasingLoops = +loops.value;
+    world.burnAngleDeg = +burn.value;
+
+    warpVal.textContent = `×${world.warp}`;
+    loopsVal.textContent = String(world.targetPhasingLoops);
+    burnVal.textContent = `${world.burnAngleDeg}°`;
+  }
+  warp.addEventListener('input', syncUI);
+  loops.addEventListener('input', syncUI);
+  burn.addEventListener('input', syncUI);
+  syncUI();
+
+  btnPause.addEventListener('click', () => {
+    world.paused = !world.paused;
+    btnPause.textContent = world.paused ? 'RESUME' : 'PAUSE';
+  });
+
+  btnReset.addEventListener('click', () => resetSim());
+
+  function resetSim() {
+    world.time = 0;
+    world.phase = 'LEO';
+    world.phaseCount = 0;
+    world.dv = 0;
+    world.leo.ang = 0;
+    world.capture.ang = 0;
+    setTransferParams();
+  }
+
+  // helpers
+  function polar(r, a) { return { x: r * Math.cos(a), y: r * Math.sin(a) }; }
+
+  function earthPos(t) {
+    const a = world.wEarth * t;
+    return polar(world.rEarth, a);
+  }
+  function marsPos(t) {
+    const a = world.wMars * t + 0.9; // phase offset for visuals
+    return polar(world.rMars, a);
+  }
+
+  // Convert heliocentric coords -> screen
+  function toScreen(p) {
+    const cx = world.w / 2;
+    const cy = world.h / 2 + 10;
+    // choose scale so Mars orbit fits nicely
+    const s = Math.min(world.w, world.h) * 0.28;
+    return { x: cx + p.x * s, y: cy + p.y * s };
+  }
+
+  // draw primitives
+  function drawCircle(center, rPx, alpha=0.18) {
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, rPx, 0, TAU);
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function drawDot(p, size=3, alpha=0.95) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, size, 0, TAU);
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fill();
+  }
+
+  function text(x, y, s, a=0.8, size=12) {
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.font = `${size}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+    ctx.fillText(s, x, y);
+  }
+
+  function drawVignette() {
+    const g = ctx.createRadialGradient(world.w*0.5, world.h*0.5, 0, world.w*0.5, world.h*0.5, Math.max(world.w, world.h)*0.65);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,0.9)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, world.w, world.h);
+  }
+
+  // Spacecraft heliocentric position (depending on phase)
+  function spacecraftPos(t) {
+    const E = earthPos(t);
+    const M = marsPos(t);
+
+    if (world.phase === 'LEO' || world.phase === 'PHASING') {
+      // small orbit around Earth
+      const local = polar(world.leo.r, world.leo.ang);
+      return { x: E.x + local.x, y: E.y + local.y };
+    }
+
+    if (world.phase === 'TMI') {
+      // one-frame-ish event; show same as Earth+LEO, then switch
+      const local = polar(world.leo.r, world.leo.ang);
+      return { x: E.x + local.x, y: E.y + local.y };
+    }
+
+    if (world.phase === 'TRANSFER') {
+      // Parametric ellipse around Sun: r(θ)=a(1-e^2)/(1+e cosθ), θ from 0..π
+      const { a, e, theta } = world.transfer;
+      const r = (a * (1 - e*e)) / (1 + e * Math.cos(theta));
+      // Rotate ellipse so perihelion aligns with Earth position at burn angle
+      const burnRad = (world.burnAngleDeg * Math.PI) / 180;
+      const baseRot = world.wEarth * world.transferStartTime + burnRad;
+      const p = polar(r, theta + baseRot);
+      return p;
+    }
+
+    if (world.phase === 'MARS_CAPTURE') {
+      // orbit around Mars
+      const local = polar(world.capture.r, world.capture.ang);
+      return { x: M.x + local.x, y: M.y + local.y };
+    }
+
+    return E;
+  }
+
+  // Phase logic
+  world.transferStartTime = 0;
+
+  function update(dtYears) {
+    if (world.paused) return;
+
+    world.time += dtYears;
+
+    // LEO / PHASING: fast angular motion around Earth
+    world.leo.ang += dtYears * TAU * 18; // ~18 orbits/year-ish (visual)
+    if (world.leo.ang > TAU) world.leo.ang -= TAU;
+
+    // Count completed LEO loops only during PHASING/LEO
+    if (world.phase === 'LEO') {
+      // switch immediately into PHASING if loops > 0
+      world.phase = (world.targetPhasingLoops > 0) ? 'PHASING' : 'TMI';
+      if (world.phase === 'TMI') {
+        doTMI();
+      }
+    } else if (world.phase === 'PHASING') {
+      // detect completed loops: when leo.ang wraps
+      // Use a simple threshold crossing by tracking phase on wrap:
+      // We'll count loops by checking if leo.ang is near 0 and time progressed.
+      // Better: keep previous angle.
+      // (store prev in closure)
+    } else if (world.phase === 'TRANSFER') {
+      world.transfer.theta += dtYears * world.transfer.thetaRate * 6.0; // visual speed
+      if (world.transfer.theta >= world.transfer.endTheta) {
+        world.transfer.theta = world.transfer.endTheta;
+        // arrive near Mars orbit; switch to capture
+        world.phase = 'MARS_CAPTURE';
+        world.dv += 1.2; // conceptual capture
+      }
+    } else if (world.phase === 'MARS_CAPTURE') {
+      world.capture.ang += dtYears * TAU * 22;
+      if (world.capture.ang > TAU) world.capture.ang -= TAU;
+    }
+  }
+
+  // Better phasing loop counter (wrap detection)
+  let prevLeoAng = world.leo.ang;
+  function updatePhasingCounter() {
+    if (world.phase !== 'PHASING') { prevLeoAng = world.leo.ang; return; }
+    // wrapped from high to low
+    if (prevLeoAng > 5.9 && world.leo.ang < 0.3) {
+      world.phaseCount += 1;
+      if (world.phaseCount >= world.targetPhasingLoops) {
+        world.phase = 'TMI';
+        doTMI();
+      }
+    }
+    prevLeoAng = world.leo.ang;
+  }
+
+  function doTMI() {
+    // Conceptual Δv: leaving LEO + injection
+    world.dv += 3.2; // not real; illustrative
+    // mark transfer start time for orientation
+    world.transferStartTime = world.time;
+    // begin transfer
+    world.phase = 'TRANSFER';
+    world.transfer.theta = 0;
+  }
+
+  // draw transfer orbit arc (0..π) oriented by burn angle at start time
+  function drawTransferOrbit() {
+    if (world.phase !== 'TRANSFER' && world.phase !== 'MARS_CAPTURE') return;
+
+    const burnRad = (world.burnAngleDeg * Math.PI) / 180;
+    const rot = world.wEarth * world.transferStartTime + burnRad;
+
+    ctx.beginPath();
+    const steps = 180;
+    for (let i = 0; i <= steps; i++) {
+      const th = (Math.PI * i) / steps;
+      const r = (world.transfer.a * (1 - world.transfer.e*world.transfer.e)) / (1 + world.transfer.e * Math.cos(th));
+      const p = polar(r, th + rot);
+      const s = toScreen(p);
+      if (i === 0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function draw() {
+    // fade trail
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(0, 0, world.w, world.h);
+
+    const E = earthPos(world.time);
+    const M = marsPos(world.time);
+    const S = { x: 0, y: 0 };
+
+    // orbits
+    drawCircle(toScreen(S), Math.min(world.w, world.h) * 0.28 * world.rEarth, 0.14);
+    drawCircle(toScreen(S), Math.min(world.w, world.h) * 0.28 * world.rMars, 0.12);
+
+    // transfer orbit arc
+    drawTransferOrbit();
+
+    // bodies
+    const sSun = toScreen(S);
+    drawDot(sSun, 4, 0.95);
+    text(sSun.x + 8, sSun.y - 6, 'SUN', 0.55, 12);
+
+    const sE = toScreen(E);
+    drawDot(sE, 3, 0.9);
+    text(sE.x + 8, sE.y - 6, 'EARTH', 0.55, 12);
+
+    const sM = toScreen(M);
+    drawDot(sM, 3, 0.85);
+    text(sM.x + 8, sM.y - 6, 'MARS', 0.55, 12);
+
+    // spacecraft
+    const P = spacecraftPos(world.time);
+    const sP = toScreen(P);
+
+    // small glow
+    ctx.beginPath();
+    ctx.arc(sP.x, sP.y, 7, 0, TAU);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fill();
+    drawDot(sP, 2.2, 0.95);
+    text(sP.x + 10, sP.y + 4, 'SHIP', 0.55, 12);
+
+    // title line
+    const phase = world.phase;
+    phasePill.textContent = `PHASE: ${phase}${phase === 'PHASING' ? ` (${world.phaseCount}/${world.targetPhasingLoops})` : ''}`;
+    tPill.textContent = `t: ${(world.time*365).toFixed(0)} days`;
+    dvPill.textContent = `Δv (concept): ${world.dv.toFixed(1)}`;
+
+    drawVignette();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(40, now - last);
+    last = now;
+
+    // convert milliseconds -> years (arbitrary mapping for visual pacing)
+    const dtYears = (dt / 1000) * (world.warp / 365); // ~1 sec * warp => days
+    update(dtYears);
+    updatePhasingCounter();
+    draw();
+
+    requestAnimationFrame(loop);
+  }
+
+  // start with clean frame
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,world.w,world.h);
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
