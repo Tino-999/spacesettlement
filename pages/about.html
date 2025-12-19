@@ -1,0 +1,54 @@
+<!-- pages/about.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>About — Space Settlement</title>
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+</head>
+<body class="bg">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="../index.html">SPACESETTLEMENT</a>
+      <nav class="nav">
+        <a class="nav__link" href="../library.html">Index</a>
+        <a class="nav__link is-active" href="about.html">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="page__intro">
+      <h1 class="page__title">About</h1>
+      <p class="page__lead">
+        This site is a curated, monochrome index of people, projects, organizations, and topics that move space settlement forward.
+        Entries are intentionally short: title, a few lines, and a link.
+      </p>
+
+      <div class="about">
+        <h2 class="h2">How to add items</h2>
+        <p class="p">Edit <code class="code">/data/items.json</code>. Add an image under <code class="code">/assets/img/cards/…</code>.</p>
+
+        <h2 class="h2">Style rules</h2>
+        <ul class="ul">
+          <li>Monochrome only.</li>
+          <li>Images fade into black (the text lives in that fade).</li>
+          <li>Short descriptions. External links for depth.</li>
+        </ul>
+
+        <div class="ctaRow">
+          <a class="btn" href="../library.html">Enter Index</a>
+          <a class="btn btn--ghost" href="../index.html">Back to Landing</a>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="footer__inner">
+        <span>Built for GitHub Pages. No build tools.</span>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

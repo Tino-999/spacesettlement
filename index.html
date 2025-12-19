@@ -1,0 +1,43 @@
+<!-- index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Space Settlement Index</title>
+  <meta name="description" content="A visual index of people, projects, organizations, and ideas advancing space settlement." />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body class="bg">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="index.html">SPACESETTLEMENT</a>
+      <nav class="nav">
+        <a class="nav__link" href="library.html">Index</a>
+        <a class="nav__link" href="pages/about.html">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="landing">
+    <canvas id="art" class="landing__canvas" aria-label="Generative art background"></canvas>
+
+    <!-- gradient overlay to ensure that “monochrome fades to black” is consistent -->
+    <div class="landing__veil" aria-hidden="true"></div>
+
+    <section id="landingCopy" class="landing__copy is-hidden">
+      <h1 class="landing__title">Space Settlement Index</h1>
+      <p class="landing__subtitle">A quiet atlas of the people, projects, organizations, and ideas pushing civilization outward.</p>
+      <div class="landing__cta">
+        <a class="btn" href="library.html">Enter Index</a>
+      </div>
+    </section>
+
+    <div class="landing__hint">
+      <span class="hint">monochrome / minimal / curated</span>
+    </div>
+  </main>
+
+  <script defer src="assets/js/art.js"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+// data/items.json
+[
+  {
+    "type": "person",
+    "title": "Gerard K. O’Neill",
+    "href": "https://en.wikipedia.org/wiki/Gerard_K._O%27Neill",
+    "image": "assets/img/cards/people/oneill.jpg",
+    "summary": "Proposed large-scale space habitats and framed an economic path to permanent off-world living.",
+    "tags": ["habitats", "space industry", "infrastructure"]
+  },
+  {
+    "type": "project",
+    "title": "Starship",
+    "href": "https://www.spacex.com/vehicles/starship/",
+    "image": "assets/img/cards/projects/starship.jpg",
+    "summary": "A fully reusable launch system aimed at reducing cost per ton to orbit and beyond.",
+    "tags": ["reusability", "launch", "logistics"]
+  },
+  {
+    "type": "org",
+    "title": "NASA Artemis",
+    "href": "https://www.nasa.gov/artemis/",
+    "image": "assets/img/cards/orgs/artemis.jpg",
+    "summary": "Lunar missions and infrastructure that can bootstrap sustained operations and industry near Earth.",
+    "tags": ["moon", "infrastructure", "program"]
+  },
+  {
+    "type": "topic",
+    "title": "In-Situ Resource Utilization (ISRU)",
+    "href": "https://en.wikipedia.org/wiki/In_situ_resource_utilization",
+    "image": "assets/img/cards/topics/isru.jpg",
+    "summary": "Using local resources (water, regolith, atmosphere) to produce propellant, life-support consumables, and materials.",
+    "tags": ["resources", "manufacturing", "self-sufficiency"]
+  }
+]

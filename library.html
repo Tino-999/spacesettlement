@@ -1,0 +1,54 @@
+<!-- library.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Index — Space Settlement</title>
+  <meta name="description" content="People, projects, organizations, and topics advancing space settlement." />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body class="bg">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="index.html">SPACESETTLEMENT</a>
+      <nav class="nav">
+        <a class="nav__link is-active" href="library.html">Index</a>
+        <a class="nav__link" href="pages/about.html">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="page__intro">
+      <h1 class="page__title">Index</h1>
+      <p class="page__lead">A visual, monochrome list. Titles link out. Text lives in the fade.</p>
+
+      <div class="controls">
+        <input id="q" class="input" type="search" placeholder="search…" autocomplete="off" />
+        <div class="chips" role="list" aria-label="Filters">
+          <button class="chip is-active" data-filter="all" type="button">all</button>
+          <button class="chip" data-filter="person" type="button">people</button>
+          <button class="chip" data-filter="project" type="button">projects</button>
+          <button class="chip" data-filter="org" type="button">orgs</button>
+          <button class="chip" data-filter="topic" type="button">topics</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="cards" class="stack" aria-live="polite"></section>
+
+    <footer class="footer">
+      <div class="footer__inner">
+        <span>© <span id="year"></span> Space Settlement Index</span>
+        <span class="sep">·</span>
+        <a class="footer__link" href="index.html">Landing</a>
+        <span class="sep">·</span>
+        <a class="footer__link" href="pages/about.html">About</a>
+      </div>
+    </footer>
+  </main>
+
+  <script defer src="assets/js/app.js"></script>
+</body>
+</html>
