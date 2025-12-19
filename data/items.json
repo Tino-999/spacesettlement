@@ -11,7 +11,7 @@
     "type": "project",
     "title": "Starship",
     "href": "https://www.spacex.com/vehicles/starship/",
-    "image": "assets/img/cards/projects/starship.jpg",
+    "image": "assets\img\cards\projects\starship.jpg",
     "summary": "A fully reusable launch system aimed at reducing cost per ton to orbit and beyond.",
     "tags": ["reusability", "launch", "logistics"]
   },
