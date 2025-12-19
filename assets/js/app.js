@@ -13,6 +13,7 @@ const TYPE_LABEL = {
   topic: 'Topic',
   book: 'Book',
   movie: 'Movie',
+  concept: 'Concept',
 };
 
   let items = [];

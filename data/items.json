@@ -16,10 +16,10 @@
     "tags": ["reusability", "launch", "logistics"]
   },
   {
-    "type": "project",
+    "type": "concept",
     "title": "O'Neill colony",
     "href": "https://en.wikipedia.org/wiki/O%27Neill_cylinder",
-    "image": "assets/img/cards/projects/oneillcylinder.jpg",
+    "image": "assets/img/cards/concepts/oneillcylinder.jpg",
     "summary": "O’Neill colonies demonstrated that large, rotating space habitats could enable permanent human life in space without planetary surfaces.",
     "tags": ["Space habitats", "Artificial gravity"]
   },
