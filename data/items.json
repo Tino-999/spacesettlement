@@ -47,4 +47,13 @@
     "summary": "A near-term survival story that popularized practical engineering constraints on Mars.",
     "tags": ["mars", "engineering", "culture"]
   }
+  {
+    "type": "person",
+    "title": "Michio Kaku",
+    "href": "https://en.wikipedia.org/wiki/Michio_Kaku",
+    "image": "assets/img/cards/people/michio_kaku.jpg",
+    "summary": "Theoretical physicist and co-founder of string field theory, advanced space settlement by popularizing O’Neill colonies and Dyson structures for a broad audience.",
+    "tags": ["O’Neill colonies", "Dyson structures", "String theory"]
+  },
+
 ]
