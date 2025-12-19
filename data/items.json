@@ -4,7 +4,7 @@
     "title": "Gerard K. O’Neill",
     "href": "https://en.wikipedia.org/wiki/Gerard_K._O%27Neill",
     "image": "assets/img/cards/people/ONeill.gif",
-    "summary": "Proposed large-scale space habitats and framed an economic path to permanent off-world living.",
+    "summary": "Physicist Proposed large-scale space habitats and framed an economic path to permanent off-world living.",
     "tags": ["habitats", "space industry", "infrastructure"]
   },
   {
@@ -14,6 +14,14 @@
     "image": "assets/img/cards/projects/starship.jpg",
     "summary": "A fully reusable launch system aimed at reducing cost per ton to orbit and beyond.",
     "tags": ["reusability", "launch", "logistics"]
+  },
+  {
+    "type": "project",
+    "title": "O'Neill colony",
+    "href": "https://en.wikipedia.org/wiki/O%27Neill_cylinder",
+    "image": "assets/img/cards/projects/oneillcylinder.jpg",
+    "summary": "O’Neill colonies demonstrated that large, rotating space habitats could enable permanent human life in space without planetary surfaces.",
+    "tags": ["Space habitats", "Artificial gravity"]
   },
   {
     "type": "org",
