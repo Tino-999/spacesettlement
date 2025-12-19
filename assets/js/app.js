@@ -6,12 +6,14 @@
 
   if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-  const TYPE_LABEL = {
-    person: 'Person',
-    project: 'Project',
-    org: 'Organization',
-    topic: 'Topic',
-  };
+const TYPE_LABEL = {
+  person: 'Person',
+  project: 'Project',
+  org: 'Organization',
+  topic: 'Topic',
+  book: 'Book',
+  movie: 'Movie',
+};
 
   let items = [];
   let filter = 'all';

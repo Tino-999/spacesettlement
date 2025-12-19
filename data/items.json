@@ -32,4 +32,21 @@
     "summary": "Using local resources (water, regolith, atmosphere) to produce propellant, life-support consumables, and materials.",
     "tags": ["resources", "manufacturing", "self-sufficiency"]
   }
+{
+  "type": "book",
+  "title": "Beyond the Known: How Exploration Created the Modern World and Will Take Us to the Stars",
+  "href": "https://www.amazon.de/Beyond-Known-Exploration-Created-Modern/dp/1471186474/ref=sr_1_3?__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=28M8F8JEVPDXC&dib=eyJ2IjoiMSJ9.VuJ4VogwFpHKKIXOqQffw77lrOxKH9zQQgHQqTC5A45y0HyZClckCayyUGQy9k4RrxT9EL-K0r4iPT0QLrknYv_tSIxJYo-hmTRAv-ZVUMwW1gb9jYhX2gLya3fDMYzKT9zLBYQ7GivR-J1k0Z_SL6-DZJ9i_DqMwbRqekhNOJVOLGfOfBUBrbtSo8rYD4daUXJKms5h2zh4AExx4DLi_5T6Xib3R9Lq9ltVRXtNcB0.5kNX656zBbJSvudbtQ5y4UokJ9F7OiLGgn19N5VCqIw&dib_tag=se&keywords=beyond+the+known&qid=1766172494&sprefix=beyound+the+known%2Caps%2C156&sr=8-3",
+  "image": "D:\Projekte\spacesettlement\assets\img\cards\books\beyound.jpg",
+  "summary": "For the first time in history, the human species has the technology to destroy itself. But having developed that power, humans are also able to leave Earth and voyage into the vastness of space. After millions of years of evolution, we’ve arrived at the point where we can settle other worlds and begin the process of becoming multi-planetary. How did we get here? What does the future hold for us?",
+  "tags": ["habitats", "vision", "systems"]
+},
+{
+  "type": "movie",
+  "title": "The Martian",
+  "href": "https://en.wikipedia.org/wiki/The_Martian_(film)",
+  "image": "assets/img/cards/movies/the-martian.jpg",
+  "summary": "A near-term survival story that popularized practical engineering constraints on Mars.",
+  "tags": ["mars", "engineering", "culture"]
+}
 ]
+
