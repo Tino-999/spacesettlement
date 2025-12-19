@@ -332,24 +332,52 @@ a:hover{opacity:.92}
 .ctaRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:16px}
 
 @media (max-width: 860px){
-  .card__row{grid-template-columns:1fr}
-  .card.is-right .card__row{grid-template-columns:1fr}
 
-  /* make the image fade DOWN into black on mobile */
-  .card__fade{
-    background: linear-gradient(180deg,
-      rgba(0,0,0,0) 0%,
-      rgba(0,0,0,.18) 35%,
-      rgba(0,0,0,.62) 62%,
-      rgba(0,0,0,1) 100%);
-  }
-
-  /* optional: slightly reduce the media height on mobile */
+  /* Layout: single column */
   .card__row{
+    grid-template-columns: 1fr;
     min-height: unset;
   }
+  .card.is-right .card__row{
+    grid-template-columns: 1fr;
+  }
+
+  /* Media area: larger, cinematic on mobile */
   .card__media{
-    height: 220px;
+    height: min(46vh, 380px);
+  }
+
+  /* Image behavior */
+  .card__img{
+    object-position: center 35%;
+  }
+
+  /* Vertical fade into black (top -> bottom) */
+  .card__fade{
+    background: linear-gradient(
+      180deg,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,0.18) 32%,
+      rgba(0,0,0,0.62) 62%,
+      rgba(0,0,0,1) 100%
+    );
+  }
+
+  /* Content spacing */
+  .card__content{
+    padding-top: 22px;
+  }
+
+  /* Controls polish on mobile */
+  .controls{
+    gap: 10px;
+  }
+
+  .chips{
+    row-gap: 8px;
+  }
+
+  .input{
+    min-width: 100%;
   }
 }
-
