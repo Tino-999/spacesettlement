@@ -334,6 +334,22 @@ a:hover{opacity:.92}
 @media (max-width: 860px){
   .card__row{grid-template-columns:1fr}
   .card.is-right .card__row{grid-template-columns:1fr}
-  .card__content{justify-content:flex-start}
-  .input{min-width:min(92vw, 520px)}
+
+  /* make the image fade DOWN into black on mobile */
+  .card__fade{
+    background: linear-gradient(180deg,
+      rgba(0,0,0,0) 0%,
+      rgba(0,0,0,.18) 35%,
+      rgba(0,0,0,.62) 62%,
+      rgba(0,0,0,1) 100%);
+  }
+
+  /* optional: slightly reduce the media height on mobile */
+  .card__row{
+    min-height: unset;
+  }
+  .card__media{
+    height: 220px;
+  }
 }
+
