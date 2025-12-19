@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Editor — Space Settlement</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body class="bg">
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <a class="brand" href="index.html">SPACESETTLEMENT</a>
+    <nav class="nav">
+      <a class="nav__link" href="library.html">Index</a>
+      <a class="nav__link is-active" href="admin.html">Editor</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <section class="page__intro">
+    <h1 class="page__title">Item Editor</h1>
+    <p class="page__lead">Create valid JSON entries for the Space Settlement Index.</p>
+  </section>
+
+  <section class="stack">
+
+    <div class="card">
+      <div class="card__row" style="grid-template-columns:1fr">
+        <div class="card__content">
+
+          <label>Type</label>
+          <select id="type" class="input">
+            <option value="person">person</option>
+            <option value="project">project</option>
+            <option value="org">org</option>
+            <option value="topic">topic</option>
+            <option value="concept">concept</option>
+            <option value="book">book</option>
+            <option value="movie">movie</option>
+          </select>
+
+          <label>Title</label>
+          <input id="title" class="input" placeholder="Gerard K. O’Neill" />
+
+          <label>Link (href)</label>
+          <input id="href" class="input" placeholder="https://…" />
+
+          <label>Image path (relative)</label>
+          <input id="image" class="input" placeholder="assets/img/cards/people/oneill.jpg" />
+
+          <label>Summary</label>
+          <textarea id="summary" class="input" rows="4"></textarea>
+
+          <label>Tags (comma separated)</label>
+          <input id="tags" class="input" placeholder="habitats, infrastructure" />
+
+          <div class="ctaRow">
+            <button id="generate" class="btn">Generate JSON</button>
+            <button id="download" class="btn btn--ghost">Download items.json</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__row" style="grid-template-columns:1fr">
+        <div class="card__content">
+          <div class="card__kicker">Output</div>
+          <pre id="output" class="code" style="white-space:pre-wrap"></pre>
+        </div>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<script src="assets/js/editor.js"></script>
+</body>
+</html>
