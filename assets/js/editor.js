@@ -3,8 +3,14 @@
 const output = document.getElementById("output");
 
 // Netlify Function endpoint (POST)
-const AUTOFILL_URL =
-  "https://inquisitive-sunshine-0cfe6a.netlify.app/.netlify/functions/autofill";
+// - If hosted on Netlify: use same-origin (cleaner, avoids CORS edge cases)
+// - Otherwise (e.g. GitHub Pages): call the Netlify backend directly
+const NETLIFY_ORIGIN = "https://inquisitive-sunshine-0cfe6a.netlify.app";
+
+const AUTOFILL_URL = location.hostname.endsWith("netlify.app")
+  ? "/.netlify/functions/autofill"
+  : `${NETLIFY_ORIGIN}/.netlify/functions/autofill`;
+
 
 function $(id) {
   return document.getElementById(id);
