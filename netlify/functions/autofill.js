@@ -1,6 +1,11 @@
 // netlify/functions/autofill.js
 // Netlify Function: CORS + OpenAI Responses API (Structured Outputs / JSON Schema)
 // Returns JSON: { type, title, href, image, summary, tags }
+//
+// CHANGE: Enforce non-empty content
+// - summary: minLength
+// - tags: minItems / maxItems + lowercase/slug-ish pattern
+// - instructions: if uncertain, write an explicit "unknown/needs verification" summary instead of empty
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -33,7 +38,29 @@ function toImagePlaceholder(title) {
     .replace(/['’]/g, "") // remove apostrophes
     .replace(/[^a-z0-9]+/g, "_") // non-alnum -> underscore
     .replace(/^_+|_+$/g, ""); // trim underscores
-  return slug ? `${slug}.jpg` : "";
+  return slug ? `${slug}.jpg` : "placeholder.jpg";
+}
+
+// Extracts structured JSON from Responses API result (Structured Outputs)
+function extractStructuredJson(data) {
+  const content = data?.output?.[0]?.content;
+  if (Array.isArray(content)) {
+    const outputJson = content.find((c) => c && c.type === "output_json" && c.json);
+    if (outputJson?.json && typeof outputJson.json === "object") return outputJson.json;
+
+    const anyJson = content.find((c) => c && c.json && typeof c.json === "object");
+    if (anyJson?.json) return anyJson.json;
+  }
+
+  // Fallback: try output_text containing JSON
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    try {
+      return JSON.parse(data.output_text);
+    } catch {
+      // ignore
+    }
+  }
+  return null;
 }
 
 exports.handler = async (event) => {
@@ -66,18 +93,30 @@ exports.handler = async (event) => {
     return text(400, "Missing title");
   }
 
-  // JSON Schema for Structured Outputs (Responses API)
-  // IMPORTANT: For json_schema format, OpenAI requires a "name" field.
+  // Enforce "content": no empty summary, at least 2 tags.
+  // Note: We still allow href = "" (unknown), and we enforce tags to be lowercase/slug-ish.
+  const tagPattern = "^[a-z0-9][a-z0-9_-]*$";
+  const imagePattern = "^[a-z0-9][a-z0-9_]*\\.jpg$"; // matches our placeholder rule (underscores + .jpg)
+
   const schema = {
     type: "object",
     additionalProperties: false,
     properties: {
-      type: { type: "string" },
-      title: { type: "string" },
-      href: { type: "string" },
-      image: { type: "string" },
-      summary: { type: "string" },
-      tags: { type: "array", items: { type: "string" } },
+      type: { type: "string", minLength: 1 },
+      title: { type: "string", minLength: 1 },
+      href: { type: "string" }, // may be empty
+      image: { type: "string", pattern: imagePattern },
+      summary: {
+        type: "string",
+        minLength: 40, // enforce at least a short factual paragraph
+        maxLength: 500,
+      },
+      tags: {
+        type: "array",
+        minItems: 2,
+        maxItems: 6,
+        items: { type: "string", minLength: 2, maxLength: 24, pattern: tagPattern },
+      },
     },
     required: ["type", "title", "href", "image", "summary", "tags"],
   };
@@ -86,10 +125,13 @@ exports.handler = async (event) => {
     "You help fill entries for a space-settlement index.\n" +
     "Be factual and neutral.\n" +
     "Rules:\n" +
+    "- Return valid JSON matching the schema.\n" +
     "- If you are unsure about href, return empty string.\n" +
     "- For image: return a placeholder filename derived from the title: firstname_lastname.jpg (lowercase, underscores). No folders.\n" +
-    "- Summary: 1–3 neutral sentences, no hype, no marketing.\n" +
-    "- Tags: 2–6 short lowercase tags, comma-free strings.\n" +
+    "- Summary: 1–3 neutral sentences. MUST NOT be empty. If you lack verified details, write a neutral placeholder like:\n" +
+    "  \"No verified summary available from provided context; please add a source link or details.\" (Do not invent facts.)\n" +
+    "- Tags: 2–6 short lowercase tags, slug style (letters/numbers/underscore/hyphen only). MUST NOT be empty.\n" +
+    "  If you lack specifics, use generic but relevant tags like: space-settlement, spaceflight, biography, organization, concept.\n" +
     "- Do NOT invent citations.\n";
 
   const input =
@@ -98,6 +140,21 @@ exports.handler = async (event) => {
     `title: ${title}\n` +
     `current (may be empty):\n${JSON.stringify(current, null, 2)}\n`;
 
+  const openaiPayload = {
+    model: "gpt-4o-mini",
+    instructions,
+    input,
+    temperature: 0.2,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "autofill_v2", // name is REQUIRED; bump version when schema changes
+        strict: true,
+        schema,
+      },
+    },
+  };
+
   try {
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -105,62 +162,62 @@ exports.handler = async (event) => {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        instructions,
-        input,
-        temperature: 0.2,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "autofill", // REQUIRED by OpenAI (fixes: Missing required parameter: 'text.format.name')
-            strict: true,
-            schema,
-          },
-        },
-      }),
+      body: JSON.stringify(openaiPayload),
     });
 
     const raw = await res.text();
 
     if (!res.ok) {
-      // Forward the OpenAI error so you see it in the editor output
       return text(500, `OpenAI error ${res.status}: ${raw}`);
     }
 
-const data = JSON.parse(raw);
+    const data = JSON.parse(raw);
+    const extracted = extractStructuredJson(data);
 
-// Structured Outputs live here:
-let obj = {};
-try {
-  obj =
-    data?.output?.[0]?.content?.find((c) => c.type === "output_json")?.json ||
-    data?.output?.[0]?.content?.[0]?.json ||
-    {};
-} catch {
-  return text(500, `Could not extract JSON from response:\n${raw}`);
-}
+    if (!extracted) {
+      return text(500, `Could not extract structured JSON from OpenAI response.\nRAW:\n${raw}`);
+    }
 
+    // Normalize & enforce your desired defaults
+    const obj = { ...extracted };
 
-    // Enforce your desired defaults
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
 
     // href: allow empty if unknown
     obj.href = String(obj.href || "");
 
-    // image: your desired placeholder rule (vorname_nachname.jpg)
+    // image: enforce placeholder rule
     const fallbackImage = toImagePlaceholder(title);
     obj.image = String(obj.image || fallbackImage);
 
-    // summary/tags
-    obj.summary = String(obj.summary || "");
-    obj.tags = Array.isArray(obj.tags)
-      ? obj.tags
-          .map((t) => String(t).toLowerCase().trim())
-          .filter(Boolean)
-          .slice(0, 6)
-      : [];
+    // summary: enforce non-empty (schema enforces length, but keep a safe fallback)
+    obj.summary = String(obj.summary || "").trim();
+    if (!obj.summary) {
+      obj.summary =
+        "No verified summary available from provided context; please add a source link or details.";
+    }
+
+    // tags: enforce 2–6, lowercase, slug-ish
+    const cleanTag = (t) =>
+      String(t || "")
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, "_")
+        .replace(/[^a-z0-9_-]/g, "")
+        .replace(/^_+|_+$/g, "");
+
+    let tags = Array.isArray(obj.tags) ? obj.tags.map(cleanTag).filter(Boolean) : [];
+    tags = [...new Set(tags)].slice(0, 6);
+
+    // If model still returns too few (shouldn't with strict+minItems), pad with generic relevant tags
+    const pad = ["space_settlement", "spaceflight", "reference"];
+    while (tags.length < 2) {
+      const next = pad.shift();
+      if (!next) break;
+      if (!tags.includes(next)) tags.push(next);
+    }
+    obj.tags = tags;
 
     return json(200, obj);
   } catch (err) {
