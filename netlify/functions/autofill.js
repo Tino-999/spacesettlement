@@ -1,6 +1,5 @@
 // netlify/functions/autofill.js
-// Netlify Function with CORS + OpenAI Responses Structured Outputs
-// Returns JSON: { type,title,href,image,summary,tags }
+// Netlify Function: OpenAI autofill with CORS + JSON schema + image placeholder
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -16,26 +15,62 @@ function jsonResponse(statusCode, obj) {
   };
 }
 
+function textResponse(statusCode, text) {
+  return {
+    statusCode,
+    headers: { ...CORS_HEADERS, "Content-Type": "text/plain; charset=utf-8" },
+    body: String(text ?? ""),
+  };
+}
+
+// Slugify "Elon Musk" -> "elon_musk"
+function slugifyFilename(input) {
+  return String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+// Map item type to your image folder
+function typeToImageFolder(type) {
+  const t = String(type || "").toLowerCase().trim();
+  const map = {
+    person: "people",
+    project: "projects",
+    org: "org",
+    topic: "topics",
+    concept: "concepts",
+    book: "books",
+    movie: "movies",
+  };
+  return map[t] || "misc";
+}
+
 exports.handler = async (event) => {
-  // CORS preflight
+  // Preflight (CORS)
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: CORS_HEADERS, body: "" };
   }
 
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: CORS_HEADERS, body: "Method Not Allowed" };
+    return textResponse(405, "Method Not Allowed");
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return { statusCode: 500, headers: CORS_HEADERS, body: "OPENAI_API_KEY missing on Netlify" };
+    return textResponse(500, "OPENAI_API_KEY missing on Netlify (Environment Variables).");
   }
 
   let req;
   try {
     req = JSON.parse(event.body || "{}");
   } catch {
-    return { statusCode: 400, headers: CORS_HEADERS, body: "Invalid JSON body" };
+    return textResponse(400, "Invalid JSON body");
   }
 
   const title = String(req.title || "").trim();
@@ -43,10 +78,11 @@ exports.handler = async (event) => {
   const current = req.current && typeof req.current === "object" ? req.current : {};
 
   if (!title) {
-    return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
+    return textResponse(400, "Missing title");
   }
 
-  // JSON Schema (strict) — conservative outputs
+  // JSON schema to force clean structured output
+  // NOTE: This is the "schema" object expected by Responses API json_schema formatter.
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -63,20 +99,22 @@ exports.handler = async (event) => {
 
   const instructions =
     "You assist a factual space-settlement knowledge base editor.\n" +
-    "Return conservative suggestions ONLY.\n" +
+    "Return conservative suggestions only.\n" +
     "Rules:\n" +
-    "- If unsure about href or image, return empty string.\n" +
-    "- Summary: 1–3 neutral sentences, neutral tone.\n" +
-    "- Tags: 2–6 short lowercase tags.\n" +
-    "- Output MUST be valid JSON matching the provided schema.\n";
+    "- href: if you are not sure, return empty string.\n" +
+    "- image: if you are not sure, return empty string (server will generate placeholder).\n" +
+    "- summary: 1–3 neutral sentences.\n" +
+    "- tags: 2–6 short lowercase tags.\n" +
+    "- Output must match the JSON schema exactly.\n";
 
-  const userInput =
-    `Fill the missing fields for this item.\n` +
-    `title: ${title}\n` +
-    `type (selected): ${type}\n` +
-    `current values:\n${JSON.stringify(current, null, 2)}\n`;
+  const input =
+    `Fill missing fields for this item.\n` +
+    `Selected type: ${type}\n` +
+    `Title: ${title}\n` +
+    `Current values (may be empty):\n${JSON.stringify(current, null, 2)}\n`;
 
   try {
+    // Netlify Node 18 has global fetch
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -86,14 +124,11 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         instructions,
-        input: userInput,
-
-        // ✅ Structured Outputs: note BOTH name + schema are required
+        input,
         text: {
           format: {
             type: "json_schema",
             name: "ItemAutofill",
-            strict: true,
             schema,
           },
         },
@@ -103,43 +138,50 @@ exports.handler = async (event) => {
     const raw = await res.text();
 
     if (!res.ok) {
-      return {
-        statusCode: 500,
-        headers: CORS_HEADERS,
-        body: `OpenAI error ${res.status}: ${raw}`,
-      };
+      // Pass through OpenAI error details
+      return textResponse(500, `OpenAI error ${res.status}: ${raw}`);
     }
 
-    const json = JSON.parse(raw);
+    let resp;
+    try {
+      resp = JSON.parse(raw);
+    } catch {
+      return textResponse(500, `OpenAI returned non-JSON response:\n${raw}`);
+    }
 
-    // Responses API: output_text should contain the JSON object
-    const out = typeof json.output_text === "string" ? json.output_text : "";
+    // Responses API: prefer output_text
+    const outText = typeof resp.output_text === "string" ? resp.output_text : "";
 
     let obj;
     try {
-      obj = JSON.parse(out || "{}");
+      obj = JSON.parse(outText || "{}");
     } catch {
-      return {
-        statusCode: 500,
-        headers: CORS_HEADERS,
-        body: `Model returned non-JSON output_text:\n${out}`,
-      };
+      return textResponse(500, `Model returned non-JSON output_text:\n${outText}`);
     }
 
-    // Defensive defaults
+    // Defensive normalization
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
     obj.href = String(obj.href || "");
     obj.image = String(obj.image || "");
     obj.summary = String(obj.summary || "");
-    obj.tags = Array.isArray(obj.tags) ? obj.tags.map(String) : [];
+    obj.tags = Array.isArray(obj.tags) ? obj.tags.map((x) => String(x).toLowerCase()) : [];
+
+    // ✅ Always generate placeholder image filename if empty
+    if (!obj.image) {
+      const folder = typeToImageFolder(obj.type);
+      const file = slugifyFilename(title) || "unknown";
+      obj.image = `assets/img/cards/${folder}/${file}.jpg`;
+    }
+
+    // If tags accidentally empty, add safe generic ones (non-factual, but helpful)
+    if (!obj.tags.length) {
+      const base = obj.type ? [String(obj.type).toLowerCase()] : [];
+      obj.tags = Array.from(new Set([...base, "space"]).values()).slice(0, 6);
+    }
 
     return jsonResponse(200, obj);
   } catch (err) {
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: `Function error: ${err?.message || err}`,
-    };
+    return textResponse(500, `Function error: ${err?.message || err}`);
   }
 };
