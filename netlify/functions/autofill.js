@@ -128,20 +128,19 @@ exports.handler = async (event) => {
       return text(500, `OpenAI error ${res.status}: ${raw}`);
     }
 
-    const data = JSON.parse(raw);
+const data = JSON.parse(raw);
 
-    // Responses API: most convenient is output_text (string)
-    const outText = typeof data.output_text === "string" ? data.output_text : "";
-    let obj = {};
-    try {
-      obj = JSON.parse(outText || "{}");
-    } catch {
-      // If the SDK/format changes, still show raw for debugging
-      return text(
-        500,
-        `Model returned non-JSON output_text:\n${outText || "(empty)"}\n\nRAW:\n${raw}`
-      );
-    }
+// Structured Outputs live here:
+let obj = {};
+try {
+  obj =
+    data?.output?.[0]?.content?.find((c) => c.type === "output_json")?.json ||
+    data?.output?.[0]?.content?.[0]?.json ||
+    {};
+} catch {
+  return text(500, `Could not extract JSON from response:\n${raw}`);
+}
+
 
     // Enforce your desired defaults
     obj.type = String(obj.type || type || "topic");
