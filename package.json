@@ -1,0 +1,8 @@
+{
+  "name": "spacesettlement",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "openai": "^5.0.0"
+  }
+}
