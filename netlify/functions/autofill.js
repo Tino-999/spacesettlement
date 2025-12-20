@@ -1,37 +1,29 @@
-import OpenAI from "openai";
+// netlify/functions/autofill.js
+// Robust: no npm deps, uses fetch to call OpenAI
 
-/**
- * Netlify Function: /.netlify/functions/autofill
- * Erwartet JSON: { title: string, type: string, current?: object }
- * Antwort: { type,title,href,image,summary,tags[] }
- */
-export default async (req) => {
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: "Method Not Allowed" };
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return new Response("OPENAI_API_KEY missing on Netlify", { status: 500 });
+    return { statusCode: 500, body: "OPENAI_API_KEY missing on Netlify" };
   }
 
   let payload;
   try {
-    payload = await req.json();
+    payload = JSON.parse(event.body || "{}");
   } catch {
-    return new Response("Invalid JSON", { status: 400 });
+    return { statusCode: 400, body: "Invalid JSON" };
   }
 
   const title = String(payload?.title || "").trim();
   const type = String(payload?.type || "").trim();
   const current = payload?.current || {};
 
-  if (!title) return new Response("Missing title", { status: 400 });
+  if (!title) return { statusCode: 400, body: "Missing title" };
 
-  const client = new OpenAI({ apiKey });
-
-  // Structured Outputs (JSON Schema) -> stabil parsbares JSON
-  // Doku: OpenAI Structured Outputs :contentReference[oaicite:3]{index=3}
   const schema = {
     name: "ItemAutofill",
     schema: {
@@ -66,22 +58,38 @@ export default async (req) => {
     `Existing values:\n${JSON.stringify(current, null, 2)}\n`;
 
   try {
-    const resp = await client.responses.create({
-      model: "gpt-4o-mini",
-      instructions,
-      input: [{ role: "user", content: userText }],
-      text: { format: { type: "json_schema", json_schema: schema } }
+    const resp = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        instructions,
+        input: [{ role: "user", content: userText }],
+        text: { format: { type: "json_schema", json_schema: schema } }
+      })
     });
 
-    const text = resp.output_text || "{}";
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return { statusCode: 500, body: `OpenAI error: ${resp.status} ${errText}` };
+    }
+
+    const data = await resp.json();
+    const text = data.output_text || "{}";
     const obj = JSON.parse(text);
 
-    // Titel nie "korrigieren"
     obj.title = title;
     obj.type = (obj.type && obj.type.trim()) ? obj.type : (type || "topic");
 
-    return Response.json(obj, { status: 200 });
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify(obj)
+    };
   } catch (e) {
-    return new Response(`OpenAI error: ${e?.message || e}`, { status: 500 });
+    return { statusCode: 500, body: `Function error: ${e?.message || e}` };
   }
 };
