@@ -1,5 +1,6 @@
 // netlify/functions/autofill.js
-// Netlify Function with FULL CORS support + robust OpenAI Responses parsing
+// Netlify Function with FULL CORS support + robust OpenAI Responses parsing (JSON schema)
+// Returns a single JSON object: { type,title,href,image,summary,tags }
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -16,13 +17,9 @@ function jsonResponse(statusCode, obj) {
 }
 
 exports.handler = async (event) => {
-  // ✅ Preflight request
+  // CORS preflight
   if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 204,
-      headers: CORS_HEADERS,
-      body: "",
-    };
+    return { statusCode: 204, headers: CORS_HEADERS, body: "" };
   }
 
   if (event.httpMethod !== "POST") {
@@ -31,7 +28,7 @@ exports.handler = async (event) => {
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return { statusCode: 500, headers: CORS_HEADERS, body: "OPENAI_API_KEY missing" };
+    return { statusCode: 500, headers: CORS_HEADERS, body: "OPENAI_API_KEY missing on Netlify" };
   }
 
   let req;
@@ -49,7 +46,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
   }
 
-  // Strict JSON schema ensures model returns machine-readable object.
+  // JSON schema used by OpenAI to force structured output
   const jsonSchema = {
     name: "ItemAutofill",
     schema: {
@@ -73,7 +70,7 @@ exports.handler = async (event) => {
     "Return conservative suggestions ONLY.\n" +
     "Rules:\n" +
     "- If unsure about href or image, return empty string.\n" +
-    "- Summary: 1–3 neutral sentences, no hype.\n" +
+    "- Summary: 1–3 neutral sentences.\n" +
     "- Tags: 2–6 short lowercase tags.\n" +
     "- Output MUST be valid JSON matching the provided schema.\n";
 
@@ -94,32 +91,35 @@ exports.handler = async (event) => {
         model: "gpt-4o-mini",
         instructions,
         input: userInput,
-        // Force structured JSON output
-        text: { format: { type: "json_schema", json_schema: jsonSchema } },
+        text: {
+          format: {
+            type: "json_schema",
+            name: "ItemAutofill", // ✅ required by API for json_schema
+            json_schema: jsonSchema,
+          },
+        },
       }),
     });
 
-    const rawText = await res.text();
+    const raw = await res.text();
 
     if (!res.ok) {
-      // Return useful error details to the UI (still CORS-safe)
       return {
         statusCode: 500,
         headers: CORS_HEADERS,
-        body: `OpenAI error ${res.status}: ${rawText}`,
+        body: `OpenAI error ${res.status}: ${raw}`,
       };
     }
 
-    const json = JSON.parse(rawText);
+    const json = JSON.parse(raw);
 
-    // ✅ The most reliable field for Responses API
-    const out = (json && typeof json.output_text === "string") ? json.output_text : "";
+    // Most reliable field for Responses API
+    const out = typeof json.output_text === "string" ? json.output_text : "";
 
     let obj;
     try {
       obj = JSON.parse(out || "{}");
     } catch {
-      // If somehow not JSON despite schema, show raw for debugging
       return {
         statusCode: 500,
         headers: CORS_HEADERS,
@@ -127,7 +127,7 @@ exports.handler = async (event) => {
       };
     }
 
-    // Ensure required shape (defensive defaults)
+    // Defensive defaults (keep shape stable)
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
     obj.href = String(obj.href || "");
