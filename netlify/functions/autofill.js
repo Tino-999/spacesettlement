@@ -1,11 +1,19 @@
 // netlify/functions/autofill.js
-// Netlify Function with FULL CORS support
+// Netlify Function with FULL CORS support + robust OpenAI Responses parsing
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+function jsonResponse(statusCode, obj) {
+  return {
+    statusCode,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(obj),
+  };
+}
 
 exports.handler = async (event) => {
   // ✅ Preflight request
@@ -18,82 +26,121 @@ exports.handler = async (event) => {
   }
 
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: CORS_HEADERS,
-      body: "Method Not Allowed",
-    };
+    return { statusCode: 405, headers: CORS_HEADERS, body: "Method Not Allowed" };
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: "OPENAI_API_KEY missing",
-    };
+    return { statusCode: 500, headers: CORS_HEADERS, body: "OPENAI_API_KEY missing" };
   }
 
-  let data;
+  let req;
   try {
-    data = JSON.parse(event.body || "{}");
+    req = JSON.parse(event.body || "{}");
   } catch {
-    return {
-      statusCode: 400,
-      headers: CORS_HEADERS,
-      body: "Invalid JSON",
-    };
+    return { statusCode: 400, headers: CORS_HEADERS, body: "Invalid JSON body" };
   }
 
-  const title = data.title || "";
-  const type = data.type || "topic";
+  const title = String(req.title || "").trim();
+  const type = String(req.type || "topic").trim();
+  const current = req.current && typeof req.current === "object" ? req.current : {};
 
-  const prompt = `
-Create a factual autofill entry.
+  if (!title) {
+    return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
+  }
 
-Title: ${title}
-Type: ${type}
+  // Strict JSON schema ensures model returns machine-readable object.
+  const jsonSchema = {
+    name: "ItemAutofill",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        type: { type: "string" },
+        title: { type: "string" },
+        href: { type: "string" },
+        image: { type: "string" },
+        summary: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      required: ["type", "title", "href", "image", "summary", "tags"],
+    },
+    strict: true,
+  };
 
-Return JSON with:
-- type
-- title
-- href (empty if unknown)
-- image (empty if unknown)
-- summary (1–3 neutral sentences)
-- tags (2–6 lowercase tags)
-`;
+  const instructions =
+    "You assist a factual space-settlement knowledge base editor.\n" +
+    "Return conservative suggestions ONLY.\n" +
+    "Rules:\n" +
+    "- If unsure about href or image, return empty string.\n" +
+    "- Summary: 1–3 neutral sentences, no hype.\n" +
+    "- Tags: 2–6 short lowercase tags.\n" +
+    "- Output MUST be valid JSON matching the provided schema.\n";
+
+  const userInput =
+    `Fill the missing fields for this item.\n` +
+    `title: ${title}\n` +
+    `type (selected): ${type}\n` +
+    `current values:\n${JSON.stringify(current, null, 2)}\n`;
 
   try {
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        input: prompt,
+        instructions,
+        input: userInput,
+        // Force structured JSON output
+        text: { format: { type: "json_schema", json_schema: jsonSchema } },
       }),
     });
 
-    const json = await res.json();
-    const text =
-      json.output?.[0]?.content?.[0]?.text ||
-      "{}";
+    const rawText = await res.text();
 
-    return {
-      statusCode: 200,
-      headers: {
-        ...CORS_HEADERS,
-        "Content-Type": "application/json",
-      },
-      body: text,
-    };
+    if (!res.ok) {
+      // Return useful error details to the UI (still CORS-safe)
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: `OpenAI error ${res.status}: ${rawText}`,
+      };
+    }
+
+    const json = JSON.parse(rawText);
+
+    // ✅ The most reliable field for Responses API
+    const out = (json && typeof json.output_text === "string") ? json.output_text : "";
+
+    let obj;
+    try {
+      obj = JSON.parse(out || "{}");
+    } catch {
+      // If somehow not JSON despite schema, show raw for debugging
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: `Model returned non-JSON output_text:\n${out}`,
+      };
+    }
+
+    // Ensure required shape (defensive defaults)
+    obj.type = String(obj.type || type || "topic");
+    obj.title = title;
+    obj.href = String(obj.href || "");
+    obj.image = String(obj.image || "");
+    obj.summary = String(obj.summary || "");
+    obj.tags = Array.isArray(obj.tags) ? obj.tags.map(String) : [];
+
+    return jsonResponse(200, obj);
   } catch (err) {
     return {
       statusCode: 500,
       headers: CORS_HEADERS,
-      body: err.message,
+      body: `Function error: ${err?.message || err}`,
     };
   }
 };
