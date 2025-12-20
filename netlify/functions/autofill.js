@@ -1,5 +1,5 @@
 // netlify/functions/autofill.js
-// Netlify Function with CORS + OpenAI Responses (Structured Outputs via text.format.schema)
+// Netlify Function with CORS + OpenAI Responses Structured Outputs
 // Returns JSON: { type,title,href,image,summary,tags }
 
 const CORS_HEADERS = {
@@ -46,7 +46,7 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
   }
 
-  // IMPORTANT: For Responses API REST, use text.format.schema (not json_schema wrapper)
+  // JSON Schema (strict) — conservative outputs
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -66,7 +66,7 @@ exports.handler = async (event) => {
     "Return conservative suggestions ONLY.\n" +
     "Rules:\n" +
     "- If unsure about href or image, return empty string.\n" +
-    "- Summary: 1–3 neutral sentences.\n" +
+    "- Summary: 1–3 neutral sentences, neutral tone.\n" +
     "- Tags: 2–6 short lowercase tags.\n" +
     "- Output MUST be valid JSON matching the provided schema.\n";
 
@@ -88,12 +88,13 @@ exports.handler = async (event) => {
         instructions,
         input: userInput,
 
-        // ✅ Structured Outputs (REST)
+        // ✅ Structured Outputs: note BOTH name + schema are required
         text: {
           format: {
             type: "json_schema",
+            name: "ItemAutofill",
             strict: true,
-            schema, // ← REQUIRED (fixes your error)
+            schema,
           },
         },
       }),
@@ -111,7 +112,7 @@ exports.handler = async (event) => {
 
     const json = JSON.parse(raw);
 
-    // Responses API: output_text should contain the JSON object as a string
+    // Responses API: output_text should contain the JSON object
     const out = typeof json.output_text === "string" ? json.output_text : "";
 
     let obj;
