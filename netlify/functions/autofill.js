@@ -1,5 +1,5 @@
 // netlify/functions/autofill.js
-// Netlify Function: OpenAI autofill with CORS + JSON schema + image placeholder
+// Better content: always summary + tags, conservative href, image placeholder allowed
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -15,62 +15,49 @@ function jsonResponse(statusCode, obj) {
   };
 }
 
-function textResponse(statusCode, text) {
-  return {
-    statusCode,
-    headers: { ...CORS_HEADERS, "Content-Type": "text/plain; charset=utf-8" },
-    body: String(text ?? ""),
-  };
-}
-
-// Slugify "Elon Musk" -> "elon_musk"
-function slugifyFilename(input) {
-  return String(input || "")
+function slugifyForFilename(title) {
+  // "Elon Musk" -> "elon_musk"
+  // keep letters/numbers, turn spaces into underscores
+  return String(title || "")
     .trim()
     .toLowerCase()
-    .replace(/ä/g, "ae")
-    .replace(/ö/g, "oe")
-    .replace(/ü/g, "ue")
-    .replace(/ß/g, "ss")
+    .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
 }
 
-// Map item type to your image folder
-function typeToImageFolder(type) {
-  const t = String(type || "").toLowerCase().trim();
-  const map = {
-    person: "people",
-    project: "projects",
-    org: "org",
-    topic: "topics",
-    concept: "concepts",
-    book: "books",
-    movie: "movies",
-  };
-  return map[t] || "misc";
+function pickImagePath(type, title) {
+  const slug = slugifyForFilename(title);
+  if (!slug) return "";
+
+  // You can adapt these folders to your project structure
+  if (type === "person") return `assets/img/cards/people/${slug}.jpg`;
+  if (type === "company") return `assets/img/cards/companies/${slug}.jpg`;
+  if (type === "place") return `assets/img/cards/places/${slug}.jpg`;
+  return `assets/img/cards/topics/${slug}.jpg`;
 }
 
 exports.handler = async (event) => {
-  // Preflight (CORS)
+  // CORS preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: CORS_HEADERS, body: "" };
   }
 
   if (event.httpMethod !== "POST") {
-    return textResponse(405, "Method Not Allowed");
+    return { statusCode: 405, headers: CORS_HEADERS, body: "Method Not Allowed" };
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return textResponse(500, "OPENAI_API_KEY missing on Netlify (Environment Variables).");
+    return { statusCode: 500, headers: CORS_HEADERS, body: "OPENAI_API_KEY missing on Netlify" };
   }
 
   let req;
   try {
     req = JSON.parse(event.body || "{}");
   } catch {
-    return textResponse(400, "Invalid JSON body");
+    return { statusCode: 400, headers: CORS_HEADERS, body: "Invalid JSON body" };
   }
 
   const title = String(req.title || "").trim();
@@ -78,43 +65,73 @@ exports.handler = async (event) => {
   const current = req.current && typeof req.current === "object" ? req.current : {};
 
   if (!title) {
-    return textResponse(400, "Missing title");
+    return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
   }
 
-  // JSON schema to force clean structured output
-  // NOTE: This is the "schema" object expected by Responses API json_schema formatter.
-  const schema = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      type: { type: "string" },
-      title: { type: "string" },
-      href: { type: "string" },
-      image: { type: "string" },
-      summary: { type: "string" },
-      tags: { type: "array", items: { type: "string" } },
+  // Image placeholder is allowed, so we can provide a default filename suggestion
+  const suggestedImage = pickImagePath(type, title);
+
+  // Force structured output + enforce non-empty summary/tags
+  const jsonSchema = {
+    name: "ItemAutofill",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        type: { type: "string", minLength: 1 },
+        title: { type: "string", minLength: 1 },
+
+        // href may be empty OR a valid http(s) URL
+        href: { type: "string", pattern: "^(|https?://.+)$" },
+
+        // image may be empty OR a relative path without spaces
+        image: { type: "string", pattern: "^(|[^\\s]+)$" },
+
+        // summary must be non-empty (at least 20 chars is a good “not blank” guard)
+        summary: { type: "string", minLength: 20, maxLength: 320 },
+
+        // 2–6 tags, lowercase, short, hyphen allowed
+        tags: {
+          type: "array",
+          minItems: 2,
+          maxItems: 6,
+          items: { type: "string", pattern: "^[a-z0-9-]{2,24}$" },
+        },
+      },
+      required: ["type", "title", "href", "image", "summary", "tags"],
     },
-    required: ["type", "title", "href", "image", "summary", "tags"],
+    strict: true,
   };
 
-  const instructions =
-    "You assist a factual space-settlement knowledge base editor.\n" +
-    "Return conservative suggestions only.\n" +
-    "Rules:\n" +
-    "- href: if you are not sure, return empty string.\n" +
-    "- image: if you are not sure, return empty string (server will generate placeholder).\n" +
-    "- summary: 1–3 neutral sentences.\n" +
-    "- tags: 2–6 short lowercase tags.\n" +
-    "- Output must match the JSON schema exactly.\n";
+  const instructions = [
+    "You assist a factual space-settlement knowledge base editor.",
+    "Goal: propose a neutral summary + useful tags even if href/image are unknown.",
+    "",
+    "Rules:",
+    "- Be factual and conservative. Do not invent specific numbers/dates if unsure.",
+    "- href: return '' if you are not confident of an official/source URL.",
+    "- image: you MAY return a placeholder filename we can create later.",
+    "- summary: ALWAYS 1–3 neutral sentences (no hype, no marketing).",
+    "- tags: ALWAYS 2–6 lowercase tags, short (e.g. 'rocket-science', 'mars', 'habitat').",
+    "",
+    "Tag style guidance (examples):",
+    "- people: 'engineer', 'entrepreneur', 'spaceflight', 'rockets', 'mars'",
+    "- companies: 'aerospace', 'launch', 'satellites', 'infrastructure'",
+    "- topics: 'habitats', 'life-support', 'in-situ-resource', 'terraforming'",
+    "",
+    "Return JSON matching the provided schema.",
+  ].join("\n");
 
-  const input =
-    `Fill missing fields for this item.\n` +
-    `Selected type: ${type}\n` +
-    `Title: ${title}\n` +
-    `Current values (may be empty):\n${JSON.stringify(current, null, 2)}\n`;
+  const userInput = [
+    "Fill missing fields for this item.",
+    `title: ${title}`,
+    `type (selected): ${type}`,
+    `suggested image placeholder (ok to use): ${suggestedImage}`,
+    "current values (may be empty):",
+    JSON.stringify(current, null, 2),
+  ].join("\n");
 
   try {
-    // Netlify Node 18 has global fetch
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -124,12 +141,12 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         instructions,
-        input,
+        input: userInput,
         text: {
           format: {
             type: "json_schema",
             name: "ItemAutofill",
-            schema,
+            json_schema: jsonSchema,
           },
         },
       }),
@@ -138,50 +155,46 @@ exports.handler = async (event) => {
     const raw = await res.text();
 
     if (!res.ok) {
-      // Pass through OpenAI error details
-      return textResponse(500, `OpenAI error ${res.status}: ${raw}`);
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: `OpenAI error ${res.status}: ${raw}`,
+      };
     }
 
-    let resp;
-    try {
-      resp = JSON.parse(raw);
-    } catch {
-      return textResponse(500, `OpenAI returned non-JSON response:\n${raw}`);
-    }
-
-    // Responses API: prefer output_text
-    const outText = typeof resp.output_text === "string" ? resp.output_text : "";
+    const apiJson = JSON.parse(raw);
+    const out = typeof apiJson.output_text === "string" ? apiJson.output_text : "";
 
     let obj;
     try {
-      obj = JSON.parse(outText || "{}");
+      obj = JSON.parse(out || "{}");
     } catch {
-      return textResponse(500, `Model returned non-JSON output_text:\n${outText}`);
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: `Model returned non-JSON output_text:\n${out}`,
+      };
     }
 
     // Defensive normalization
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
+
     obj.href = String(obj.href || "");
-    obj.image = String(obj.image || "");
+    obj.image = String(obj.image || suggestedImage || ""); // default to placeholder
     obj.summary = String(obj.summary || "");
-    obj.tags = Array.isArray(obj.tags) ? obj.tags.map((x) => String(x).toLowerCase()) : [];
 
-    // ✅ Always generate placeholder image filename if empty
-    if (!obj.image) {
-      const folder = typeToImageFolder(obj.type);
-      const file = slugifyFilename(title) || "unknown";
-      obj.image = `assets/img/cards/${folder}/${file}.jpg`;
-    }
+    obj.tags = Array.isArray(obj.tags) ? obj.tags.map((t) => String(t).toLowerCase()) : [];
 
-    // If tags accidentally empty, add safe generic ones (non-factual, but helpful)
-    if (!obj.tags.length) {
-      const base = obj.type ? [String(obj.type).toLowerCase()] : [];
-      obj.tags = Array.from(new Set([...base, "space"]).values()).slice(0, 6);
-    }
+    // If model returned empty image even though allowed, fill it:
+    if (!obj.image) obj.image = suggestedImage;
 
     return jsonResponse(200, obj);
   } catch (err) {
-    return textResponse(500, `Function error: ${err?.message || err}`);
+    return {
+      statusCode: 500,
+      headers: CORS_HEADERS,
+      body: `Function error: ${err?.message || err}`,
+    };
   }
 };
