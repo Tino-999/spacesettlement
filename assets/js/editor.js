@@ -3,14 +3,17 @@
 const output = document.getElementById("output");
 
 // Netlify Function endpoint (POST)
-// - If hosted on Netlify: use same-origin (cleaner, avoids CORS edge cases)
-// - Otherwise (e.g. GitHub Pages): call the Netlify backend directly
+// - If hosted on Netlify: use same-origin
+// - Otherwise: call the Netlify backend directly
 const NETLIFY_ORIGIN = "https://inquisitive-sunshine-0cfe6a.netlify.app";
 
 const AUTOFILL_URL = location.hostname.endsWith("netlify.app")
   ? "/.netlify/functions/autofill"
   : `${NETLIFY_ORIGIN}/.netlify/functions/autofill`;
 
+const ITEMS_URL = location.hostname.endsWith("netlify.app")
+  ? "/.netlify/functions/items"
+  : `${NETLIFY_ORIGIN}/.netlify/functions/items`;
 
 function $(id) {
   return document.getElementById(id);
@@ -22,16 +25,13 @@ function getValue(id) {
 
 function setValue(id, value) {
   const el = $(id);
-  if (!el) return;
-
-  if (value == null) return;
+  if (!el || value == null) return;
 
   if (Array.isArray(value)) {
     el.value = value.join(", ");
-    return;
+  } else {
+    el.value = String(value);
   }
-
-  el.value = String(value);
 }
 
 function buildItem() {
@@ -59,6 +59,9 @@ async function safeReadJson(res) {
   }
 }
 
+// -------------------------
+// AI AUTOFILL (preview only)
+// -------------------------
 async function autofillFromAI() {
   const title = getValue("title");
   const type = getValue("type");
@@ -71,9 +74,8 @@ async function autofillFromAI() {
   const btn = $("autofill");
   if (btn) btn.disabled = true;
 
-  output.textContent = `Auto-Fill läuft…\nPOST ${AUTOFILL_URL}`;
+  output.textContent = "Auto-Fill läuft…";
 
-  // send current state (optional, but helpful)
   const current = buildItem();
 
   let res;
@@ -85,8 +87,7 @@ async function autofillFromAI() {
     });
   } catch (e) {
     if (btn) btn.disabled = false;
-    output.textContent =
-      "Netzwerkfehler beim Aufruf der Function.\n" + (e?.message || e);
+    output.textContent = "Netzwerkfehler:\n" + (e?.message || e);
     return;
   }
 
@@ -95,94 +96,79 @@ async function autofillFromAI() {
   if (!res.ok) {
     if (btn) btn.disabled = false;
     output.textContent =
-      `Fehler von der Function (HTTP ${res.status}).\n\n` +
+      `Autofill-Fehler (HTTP ${res.status}):\n` +
       (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw);
     return;
   }
 
-  // The function should ideally return the object directly.
-  // But we handle both cases:
-  // - direct object: { type,title,href,image,summary,tags }
-  // - wrapper: { output_text: "{...json...}" } etc.
-  let data = null;
-
-  if (parsed.ok && parsed.json && typeof parsed.json === "object") {
-    // If it already looks like our item, use it
-    if (
-      "summary" in parsed.json ||
-      "tags" in parsed.json ||
-      "href" in parsed.json ||
-      "image" in parsed.json
-    ) {
-      data = parsed.json;
-    } else if (typeof parsed.json.output_text === "string") {
-      try {
-        data = JSON.parse(parsed.json.output_text);
-      } catch {
-        // fallback
-        data = null;
-      }
-    }
-  }
-
+  const data = parsed.ok && parsed.json ? parsed.json : null;
   if (!data) {
     if (btn) btn.disabled = false;
-    output.textContent =
-      "Antwort war kein verwendbares JSON.\n\nRAW:\n" + parsed.raw;
+    output.textContent = "Ungültige Autofill-Antwort.";
     return;
   }
 
-  // ✅ Überschreiben erlaubt, weil es nur Vorschläge sind:
-  if (typeof data.href === "string") setValue("href", data.href);
-  if (typeof data.image === "string") setValue("image", data.image);
-  if (typeof data.summary === "string") setValue("summary", data.summary);
-  if (Array.isArray(data.tags)) setValue("tags", data.tags);
+  // Vorschläge in Formular übernehmen
+  setValue("href", data.href);
+  setValue("image", data.image);
+  setValue("summary", data.summary);
+  setValue("tags", data.tags);
 
-  // Output aktualisieren
   output.textContent = JSON.stringify(buildItem(), null, 2);
 
   if (btn) btn.disabled = false;
 }
 
+// -------------------------
+// PUBLISH (final save)
+// -------------------------
+async function publishItem() {
+  const item = buildItem();
+
+  output.textContent = "Publishing…";
+
+  const res = await fetch(ITEMS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      // Optional: absichern
+      // "x-admin-token": window.ADMIN_TOKEN || ""
+    },
+    body: JSON.stringify(item),
+  });
+
+  const parsed = await safeReadJson(res);
+
+  if (!res.ok) {
+    output.textContent =
+      `Publish-Fehler (HTTP ${res.status}):\n` +
+      (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw);
+    return;
+  }
+
+  output.textContent =
+    "✔ Published\n\n" + JSON.stringify(parsed.json, null, 2);
+  alert("Item veröffentlicht ✔");
+}
+
+// -------------------------
+// UI wiring
+// -------------------------
 $("generate").addEventListener("click", () => {
   output.textContent = JSON.stringify(buildItem(), null, 2);
 });
 
-$("download").addEventListener("click", () => {
-  const item = buildItem();
-
-  fetch("data/items.json")
-    .then((r) => r.json())
-    .then((data) => {
-      data.push(item);
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "items.json";
-      a.click();
-      URL.revokeObjectURL(a.href);
-    })
-    .catch(() => {
-      const blob = new Blob([JSON.stringify(item, null, 2)], {
-        type: "application/json",
-      });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "item.json";
-      a.click();
-      URL.revokeObjectURL(a.href);
-    });
+$("autofill").addEventListener("click", () => {
+  autofillFromAI().catch((err) => {
+    console.error(err);
+    output.textContent = `Auto-Fill Fehler: ${err?.message || err}`;
+    $("autofill").disabled = false;
+  });
 });
 
-const autofillBtn = $("autofill");
-if (autofillBtn) {
-  autofillBtn.addEventListener("click", () => {
-    autofillFromAI().catch((err) => {
-      console.error(err);
-      output.textContent = `Auto-Fill Fehler: ${err?.message || err}`;
-      autofillBtn.disabled = false;
-    });
+$("publish").addEventListener("click", () => {
+  publishItem().catch((err) => {
+    console.error(err);
+    output.textContent = `Publish Fehler: ${err?.message || err}`;
   });
-}
+});
