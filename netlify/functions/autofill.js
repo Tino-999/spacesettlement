@@ -2,13 +2,12 @@
 // Netlify Function: CORS + OpenAI Responses API (Structured Outputs / JSON Schema)
 // Returns JSON: { type, title, href, image, summary, tags }
 //
-// Enforces non-empty content:
-// - summary: minLength >= 40
-// - tags: 2..6 items, slug-style lowercase
-//
-// Also robustly extracts JSON from Responses API, whether it comes back as:
-// - content[].type === "output_json" with content[].json
-// - content[].type === "output_text" with content[].text containing JSON
+// Changes requested:
+// - href should be the Wikipedia page if it exists; otherwise "kein Wiki" (German string, as requested).
+//   Implementation: lookup via Wikipedia REST API server-side (factual; avoids LLM guessing).
+// - summary must always be short English text answering:
+//   "Why is the person recognized among scientists and what is their contribution to space settlement?"
+//   If unknown from context, say so explicitly (do not invent facts).
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,36 +37,30 @@ function toImagePlaceholder(title) {
   const slug = String(title || "")
     .trim()
     .toLowerCase()
-    .replace(/['’]/g, "") // remove apostrophes
-    .replace(/[^a-z0-9]+/g, "_") // non-alnum -> underscore
-    .replace(/^_+|_+$/g, ""); // trim underscores
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
   return slug ? `${slug}.jpg` : "placeholder.jpg";
 }
 
-// Extracts JSON from Responses API result (Structured Outputs).
+// Extract JSON from Responses API result (Structured Outputs).
 // Handles both "output_json" and "output_text" (JSON-as-string) variants.
 function extractStructuredJson(data) {
   const outputs = Array.isArray(data?.output) ? data.output : [];
 
-  // 1) Preferred: "output_json" blocks
+  // 1) Preferred: "output_json"
   for (const out of outputs) {
     const content = Array.isArray(out?.content) ? out.content : [];
     for (const c of content) {
-      if (c && c.type === "output_json" && c.json && typeof c.json === "object") {
-        return c.json;
-      }
-      // Some variants may put json directly on content items
-      if (c && c.json && typeof c.json === "object") {
-        return c.json;
-      }
+      if (c && c.type === "output_json" && c.json && typeof c.json === "object") return c.json;
+      if (c && c.json && typeof c.json === "object") return c.json;
     }
   }
 
-  // 2) Common: JSON returned as text inside content items
+  // 2) Common: JSON in content[].text
   for (const out of outputs) {
     const content = Array.isArray(out?.content) ? out.content : [];
     for (const c of content) {
-      // Observed in your screenshot: type "output_text" with field "text"
       if (c && (c.type === "output_text" || c.type === "text") && typeof c.text === "string") {
         const s = c.text.trim();
         if (!s) continue;
@@ -80,7 +73,7 @@ function extractStructuredJson(data) {
     }
   }
 
-  // 3) Fallback: convenience field output_text (may be absent)
+  // 3) Fallback: data.output_text convenience field
   if (typeof data?.output_text === "string") {
     const s = data.output_text.trim();
     if (s) {
@@ -95,12 +88,45 @@ function extractStructuredJson(data) {
   return null;
 }
 
+// Wikipedia lookup via REST summary endpoint.
+// Returns a canonical page URL if found, else null.
+async function wikipediaUrlForTitle(title) {
+  const t = String(title || "").trim();
+  if (!t) return null;
+
+  const encoded = encodeURIComponent(t.replace(/\s+/g, "_"));
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encoded}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        // polite UA; Wikipedia may throttle generic/no UA requests
+        "User-Agent": "spacesettlement-index/1.0 (Netlify Function)",
+        "Accept": "application/json",
+      },
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+
+    // Disambiguation pages are still pages, but often not what we want.
+    // If it's disambiguation, treat as "not found" to avoid wrong href.
+    if (data?.type === "disambiguation") return null;
+
+    const pageUrl = data?.content_urls?.desktop?.page;
+    return typeof pageUrl === "string" && pageUrl.startsWith("http") ? pageUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 exports.handler = async (event) => {
   // CORS preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: CORS_HEADERS, body: "" };
   }
-
   if (event.httpMethod !== "POST") {
     return text(405, "Method Not Allowed");
   }
@@ -121,14 +147,12 @@ exports.handler = async (event) => {
   const type = String(req.type || "topic").trim();
   const current = req.current && typeof req.current === "object" ? req.current : {};
 
-  if (!title) {
-    return text(400, "Missing title");
-  }
+  if (!title) return text(400, "Missing title");
 
-  // Enforce "content": no empty summary, at least 2 tags.
-  // href may be empty if unknown.
+  // We will fill href server-side (Wikipedia lookup), so model does NOT need to provide it.
+  // Still keep href in schema because the function returns it.
   const tagPattern = "^[a-z0-9][a-z0-9_-]*$";
-  const imagePattern = "^[a-z0-9][a-z0-9_]*\\.jpg$"; // underscores + .jpg
+  const imagePattern = "^[a-z0-9][a-z0-9_]*\\.jpg$";
 
   const schema = {
     type: "object",
@@ -136,23 +160,16 @@ exports.handler = async (event) => {
     properties: {
       type: { type: "string", minLength: 1 },
       title: { type: "string", minLength: 1 },
-      href: { type: "string" }, // may be empty
+      // We'll accept anything here, but will overwrite with Wikipedia URL or "kein Wiki"
+      href: { type: "string", minLength: 1 },
       image: { type: "string", pattern: imagePattern },
-      summary: {
-        type: "string",
-        minLength: 40, // enforce non-empty meaningful summary
-        maxLength: 500,
-      },
+      // Short and always present (we'll enforce a fallback if needed)
+      summary: { type: "string", minLength: 20, maxLength: 280 },
       tags: {
         type: "array",
         minItems: 2,
         maxItems: 6,
-        items: {
-          type: "string",
-          minLength: 2,
-          maxLength: 24,
-          pattern: tagPattern,
-        },
+        items: { type: "string", minLength: 2, maxLength: 24, pattern: tagPattern },
       },
     },
     required: ["type", "title", "href", "image", "summary", "tags"],
@@ -161,14 +178,16 @@ exports.handler = async (event) => {
   const instructions =
     "You help fill entries for a space-settlement index.\n" +
     "Be factual and neutral.\n" +
+    "IMPORTANT: Do not invent facts.\n" +
+    "Output valid JSON matching the schema.\n" +
     "Rules:\n" +
-    "- Return valid JSON matching the schema.\n" +
-    "- If you are unsure about href, return empty string.\n" +
-    "- For image: return a placeholder filename derived from the title: firstname_lastname.jpg (lowercase, underscores). No folders.\n" +
-    "- Summary: 1–3 neutral sentences. MUST NOT be empty. If you lack verified details, write a neutral placeholder like:\n" +
-    '  "No verified summary available from provided context; please add a source link or details." (Do not invent facts.)\n' +
-    "- Tags: 2–6 short lowercase tags, slug style (letters/numbers/underscore/hyphen only). MUST NOT be empty.\n" +
-    "- Do NOT invent citations.\n";
+    "- href: you may leave as empty or placeholder; server will overwrite.\n" +
+    "- image: placeholder filename from title: firstname_lastname.jpg (lowercase, underscores). No folders.\n" +
+    "- Summary: English, as short as possible, and MUST answer:\n" +
+    "  (1) Why is the person recognized among scientists?\n" +
+    "  (2) What is their contribution to space settlement?\n" +
+    "  If either is not verifiable from the provided context, explicitly say so (e.g., 'Not established from provided context').\n" +
+    "- Tags: 2–6 short lowercase slug tags (letters/numbers/underscore/hyphen only).\n";
 
   const input =
     `Create an autofill suggestion for this entry.\n` +
@@ -184,7 +203,7 @@ exports.handler = async (event) => {
     text: {
       format: {
         type: "json_schema",
-        name: "autofill_v2", // REQUIRED by OpenAI; bump when schema changes
+        name: "autofill_v3",
         strict: true,
         schema,
       },
@@ -192,6 +211,10 @@ exports.handler = async (event) => {
   };
 
   try {
+    // 1) Get Wikipedia URL (factual) in parallel with LLM generation
+    const wikiPromise = wikipediaUrlForTitle(title);
+
+    // 2) Get LLM output
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -202,17 +225,15 @@ exports.handler = async (event) => {
     });
 
     const raw = await res.text();
-
-    if (!res.ok) {
-      return text(500, `OpenAI error ${res.status}: ${raw}`);
-    }
+    if (!res.ok) return text(500, `OpenAI error ${res.status}: ${raw}`);
 
     const data = JSON.parse(raw);
     const extracted = extractStructuredJson(data);
-
     if (!extracted) {
       return text(500, `Could not extract structured JSON from OpenAI response.\nRAW:\n${raw}`);
     }
+
+    const wikiUrl = await wikiPromise;
 
     // Normalize & enforce defaults
     const obj = { ...extracted };
@@ -220,17 +241,17 @@ exports.handler = async (event) => {
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
 
-    // href: allow empty if unknown
-    obj.href = String(obj.href || "");
+    // href: Wikipedia URL or "kein Wiki"
+    obj.href = wikiUrl || "kein Wiki";
 
     // image: enforce placeholder rule
     obj.image = String(obj.image || toImagePlaceholder(title));
 
-    // summary: ensure non-empty (schema enforces, but keep safe fallback)
+    // summary: must be short English and not empty
     obj.summary = String(obj.summary || "").trim();
-    if (obj.summary.length < 40) {
+    if (obj.summary.length < 20) {
       obj.summary =
-        "No verified summary available from provided context; please add a source link or details.";
+        "Recognition among scientists: not established from provided context. Contribution to space settlement: not established from provided context.";
     }
 
     // tags: enforce 2–6, lowercase, slug-ish
@@ -245,8 +266,8 @@ exports.handler = async (event) => {
     let tags = Array.isArray(obj.tags) ? obj.tags.map(cleanTag).filter(Boolean) : [];
     tags = [...new Set(tags)].slice(0, 6);
 
-    // If model still returns too few (shouldn't with strict+minItems), pad with generic relevant tags
-    const pad = ["space_settlement", "spaceflight", "reference", "biography", "organization", "concept"];
+    // Pad if too few (should be rare with strict+minItems)
+    const pad = ["space_settlement", "spaceflight", "reference", "biography"];
     while (tags.length < 2 && pad.length) {
       const next = pad.shift();
       if (next && !tags.includes(next)) tags.push(next);
