@@ -28,6 +28,13 @@ function normalizeTags(tags) {
   return tags.map((t) => String(t).trim()).filter(Boolean);
 }
 
+function authOk(req) {
+  const required = process.env.ADMIN_TOKEN;
+  if (!required) return true; // open if not set
+  const token = req.headers.get("x-admin-token");
+  return token === required;
+}
+
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response("", { status: 204, headers: HEADERS });
 
@@ -39,16 +46,18 @@ export default async (req) => {
   if (req.method === "GET") {
     try {
       const listed = await store.list({ prefix: "items/" });
-      const keys = (listed?.blobs || []).map((b) => b.key).filter(Boolean);
+      const blobs = listed?.blobs || [];
 
       const items = (await Promise.all(
-        keys.map(async (key) => {
-          const raw = await store.get(key); // <- IMPORTANT: no getJSON()
+        blobs.map(async (b) => {
+          const key = b.key;
+          const raw = await store.get(key);
           if (!raw) return null;
           try {
-            return JSON.parse(raw);
+            const obj = JSON.parse(raw);
+            // include internal key so admin can delete safely
+            return { ...obj, _key: key };
           } catch {
-            // If a non-JSON blob exists under items/, ignore it
             return null;
           }
         })
@@ -67,12 +76,7 @@ export default async (req) => {
   // POST: publish/save
   // ----------------
   if (req.method === "POST") {
-    // Optional auth (you said: leave it off for now)
-    const tokenRequired = process.env.ADMIN_TOKEN;
-    if (tokenRequired) {
-      const token = req.headers.get("x-admin-token");
-      if (token !== tokenRequired) return text(401, "Unauthorized");
-    }
+    if (!authOk(req)) return text(401, "Unauthorized");
 
     let item;
     try {
@@ -106,21 +110,26 @@ export default async (req) => {
   }
 
   // ----------------
-  // DELETE: optional
+  // DELETE: delete by key (preferred) or by id
   // ----------------
   if (req.method === "DELETE") {
-    const tokenRequired = process.env.ADMIN_TOKEN;
-    if (tokenRequired) {
-      const token = req.headers.get("x-admin-token");
-      if (token !== tokenRequired) return text(401, "Unauthorized");
-    }
+    if (!authOk(req)) return text(401, "Unauthorized");
 
     const url = new URL(req.url);
+    const key = url.searchParams.get("key");
     const id = url.searchParams.get("id");
-    if (!isNonEmptyString(id)) return text(400, "Missing id");
 
-    await store.delete(`items/${id}.json`);
-    return json(200, { ok: true });
+    if (isNonEmptyString(key)) {
+      await store.delete(key);
+      return json(200, { ok: true });
+    }
+
+    if (isNonEmptyString(id)) {
+      await store.delete(`items/${id}.json`);
+      return json(200, { ok: true });
+    }
+
+    return text(400, "Missing key or id");
   }
 
   return text(405, "Method Not Allowed");
