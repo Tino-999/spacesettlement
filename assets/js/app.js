@@ -1,139 +1,191 @@
 // assets/js/app.js
-(() => {
-  const cardsEl = document.getElementById('cards');
-  const qEl = document.getElementById('q');
-  const yearEl = document.getElementById('year');
+// Loads items either from Netlify Blobs API (recommended) or from static data/items.json (fallback).
+// Provides simple search + type filter and renders cards into #cards.
 
-  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+const NETLIFY_ORIGIN = "https://inquisitive-sunshine-0cfe6a.netlify.app";
 
-const TYPE_LABEL = {
-  person: 'Person',
-  project: 'Project',
-  org: 'Organization',
-  topic: 'Topic',
-  book: 'Book',
-  movie: 'Movie',
-  concept: 'Concept',
+const IS_NETLIFY = location.hostname.endsWith("netlify.app");
+
+// On Netlify, same-origin functions work. Else (GitHub Pages), fallback to static JSON.
+// Note: You *can* call Netlify cross-origin, but for now we keep GH Pages as a static demo.
+const ITEMS_URL = IS_NETLIFY
+  ? "/.netlify/functions/items"
+  : "data/items.json";
+
+const els = {
+  q: document.getElementById("q"),
+  cards: document.getElementById("cards"),
+  year: document.getElementById("year"),
+  chips: Array.from(document.querySelectorAll(".chip[data-filter]")),
 };
 
-  let items = [];
-  let filter = 'all';
-  let query = '';
+let allItems = [];
+let activeFilter = "all";
 
-  function norm(s) {
-    return (s || '').toLowerCase().trim();
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  }[m]));
+}
+
+function normalizeText(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+function resolveImagePath(item) {
+  const img = String(item?.image ?? "").trim();
+  if (!img) return "";
+
+  // Already a path like "assets/img/cards/people/x.jpg"
+  if (img.includes("/")) return img;
+
+  // If only a filename like "elon_musk.jpg"
+  const type = String(item?.type ?? "").trim().toLowerCase();
+
+  if (type === "person") return `assets/img/cards/people/${img}`;
+
+  // Generic fallback for non-person types
+  return `assets/img/cards/${img}`;
+}
+
+async function loadItems() {
+  const res = await fetch(ITEMS_URL, { cache: "no-store" });
+  const data = await res.json();
+
+  // Netlify function returns { ok:true, items:[...] }
+  if (data && typeof data === "object" && Array.isArray(data.items)) {
+    return data.items;
   }
 
-  function matches(it) {
-    if (filter !== 'all' && it.type !== filter) return false;
-    if (!query) return true;
-
-    const hay = [
-      it.title,
-      it.summary,
-      (it.tags || []).join(' ')
-    ].join(' ');
-    return norm(hay).includes(query);
+  // Static file returns [...]
+  if (Array.isArray(data)) {
+    return data;
   }
 
-  function escapeHtml(s) {
-    return String(s ?? '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
+  return [];
+}
+
+function setActiveChip(filter) {
+  activeFilter = filter;
+  els.chips.forEach((b) => {
+    const isActive = b.dataset.filter === filter;
+    b.classList.toggle("is-active", isActive);
+  });
+}
+
+function passesFilter(item, q, filter) {
+  const type = String(item.type ?? "").toLowerCase();
+
+  if (filter !== "all" && type !== filter) return false;
+
+  if (!q) return true;
+
+  const hay = [
+    item.title,
+    item.summary,
+    item.href,
+    ...(Array.isArray(item.tags) ? item.tags : []),
+    item.type,
+  ].map(normalizeText).join(" ");
+
+  return hay.includes(q);
+}
+
+function render(items) {
+  if (!els.cards) return;
+
+  if (!items.length) {
+    els.cards.innerHTML = `<div class="card"><div class="card__row" style="grid-template-columns:1fr"><div class="card__content"><div class="card__kicker">No results</div><p class="page__lead">Nothing matched your filter/search.</p></div></div></div>`;
+    return;
   }
 
-  function cardTemplate(it, idx) {
-    const sideClass = (idx % 2 === 0) ? 'is-left' : 'is-right';
-    const kicker = TYPE_LABEL[it.type] || 'Item';
-    const tags = (it.tags || []).slice(0, 6);
+  els.cards.innerHTML = items.map((item) => {
+    const title = escapeHtml(item.title || "");
+    const href = escapeHtml(item.href || "");
+    const summary = escapeHtml(item.summary || "");
+    const tags = Array.isArray(item.tags) ? item.tags : [];
+    const imagePath = escapeHtml(resolveImagePath(item));
+    const type = escapeHtml(item.type || "");
 
-    // If image missing, still looks good due to media background gradients.
-    const imgHtml = it.image
-      ? `<img class="card__img" src="${escapeHtml(it.image)}" alt="${escapeHtml(it.title)}" loading="lazy" />`
-      : '';
+    // If href is "kein Wiki" (from your autofill rules), don't make it a link.
+    const hasLink = href && href !== "kein Wiki";
 
     return `
-      <article class="card ${sideClass}">
-        <div class="card__row">
-          <div class="card__media" aria-hidden="true">
-            ${imgHtml}
-            <div class="card__fade"></div>
+      <article class="card">
+        <div class="card__row" style="grid-template-columns:160px 1fr">
+          <div class="card__media" style="display:flex; align-items:center; justify-content:center;">
+            ${imagePath
+              ? `<img src="${imagePath}" alt="${title}" style="width:140px; height:140px; object-fit:cover; border-radius:16px; opacity:0.9;" loading="lazy">`
+              : `<div style="width:140px; height:140px; border-radius:16px; background:rgba(255,255,255,0.06);"></div>`
+            }
           </div>
           <div class="card__content">
-            <div class="card__kicker">${escapeHtml(kicker)}</div>
-            <h2 class="card__title">
-              <a href="${escapeHtml(it.href || '#')}" target="_blank" rel="noopener noreferrer">${escapeHtml(it.title)}</a>
+            <div class="card__kicker">${type}</div>
+            <h2 style="margin:0 0 6px 0; font-size:22px; letter-spacing:0.02em;">
+              ${
+                hasLink
+                  ? `<a href="${href}" target="_blank" rel="noopener" class="nav__link" style="padding:0; border:none;">${title}</a>`
+                  : `${title}`
+              }
             </h2>
-            <p class="card__summary">${escapeHtml(it.summary || '')}</p>
-            ${tags.length ? `<div class="card__meta">${tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+            ${summary ? `<p class="page__lead" style="margin:0 0 10px 0; font-size:14px;">${summary}</p>` : ""}
+            ${
+              tags.length
+                ? `<div class="chips" role="list" aria-label="tags">
+                    ${tags.map((t) => `<span class="chip" role="listitem" style="cursor:default;">${escapeHtml(t)}</span>`).join("")}
+                   </div>`
+                : ``
+            }
           </div>
         </div>
       </article>
     `;
-  }
+  }).join("");
+}
 
-  function render() {
-    if (!cardsEl) return;
+function applyAndRender() {
+  const q = normalizeText(els.q?.value || "");
+  const filtered = allItems.filter((it) => passesFilter(it, q, activeFilter));
+  render(filtered);
+}
 
-    const view = items.filter(matches);
-    if (!view.length) {
-      cardsEl.innerHTML = `
-        <div class="card">
-          <div class="card__row" style="grid-template-columns:1fr">
-            <div class="card__content" style="min-height:220px">
-              <div class="card__kicker">No results</div>
-              <h2 class="card__title">Nothing matches.</h2>
-              <p class="card__summary">Try a different filter or search phrase.</p>
-            </div>
-          </div>
-        </div>
-      `;
-      return;
+async function init() {
+  if (els.year) els.year.textContent = String(new Date().getFullYear());
+
+  try {
+    allItems = await loadItems();
+  } catch (e) {
+    console.error(e);
+    if (els.cards) {
+      els.cards.innerHTML = `<div class="card"><div class="card__row" style="grid-template-columns:1fr"><div class="card__content"><div class="card__kicker">Error</div><pre class="code" style="white-space:pre-wrap;">${escapeHtml(e?.message || e)}</pre></div></div></div>`;
     }
-
-    cardsEl.innerHTML = view.map((it, i) => cardTemplate(it, i)).join('');
+    return;
   }
 
-  function setActiveChip(type) {
-    document.querySelectorAll('.chip').forEach(btn => {
-      btn.classList.toggle('is-active', btn.dataset.filter === type);
+  // Default sort: title asc (stable, nice for browsing)
+  allItems.sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+
+  // Wire chips
+  els.chips.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setActiveChip(btn.dataset.filter || "all");
+      applyAndRender();
     });
-  }
+  });
 
-  async function init() {
-    try {
-      const res = await fetch('data/items.json', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Failed to load data/items.json (${res.status})`);
-      const data = await res.json();
-      if (!Array.isArray(data)) throw new Error('items.json must be an array');
-      items = data;
-    } catch (e) {
-      console.error(e);
-      items = [];
-    }
+  // Wire search
+  els.q?.addEventListener("input", () => applyAndRender());
 
-    render();
+  // Initial render
+  setActiveChip("all");
+  applyAndRender();
+}
 
-    // chips
-    document.querySelectorAll('.chip').forEach(btn => {
-      btn.addEventListener('click', () => {
-        filter = btn.dataset.filter || 'all';
-        setActiveChip(filter);
-        render();
-      });
-    });
-
-    // search
-    if (qEl) {
-      qEl.addEventListener('input', () => {
-        query = norm(qEl.value);
-        render();
-      }, { passive: true });
-    }
-  }
-
-  init();
-})();
+init();
