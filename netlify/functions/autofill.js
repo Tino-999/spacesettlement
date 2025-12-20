@@ -1,5 +1,6 @@
 // netlify/functions/autofill.js
-// Better content: always summary + tags, conservative href, image placeholder allowed
+// Netlify Function: CORS + OpenAI Responses API (Structured Outputs / JSON Schema)
+// Returns JSON: { type, title, href, image, summary, tags }
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -7,7 +8,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function jsonResponse(statusCode, obj) {
+function json(statusCode, obj) {
   return {
     statusCode,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json; charset=utf-8" },
@@ -15,27 +16,16 @@ function jsonResponse(statusCode, obj) {
   };
 }
 
-function slugifyForFilename(title) {
-  // "Elon Musk" -> "elon_musk"
-  // keep letters/numbers, turn spaces into underscores
-  return String(title || "")
+function toImagePlaceholder(title) {
+  // "Elon Musk" -> "elon_musk.jpg"
+  // "Gerard K. O'Neill" -> "gerard_k_oneill.jpg"
+  const slug = String(title || "")
     .trim()
     .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 80);
-}
-
-function pickImagePath(type, title) {
-  const slug = slugifyForFilename(title);
-  if (!slug) return "";
-
-  // You can adapt these folders to your project structure
-  if (type === "person") return `assets/img/cards/people/${slug}.jpg`;
-  if (type === "company") return `assets/img/cards/companies/${slug}.jpg`;
-  if (type === "place") return `assets/img/cards/places/${slug}.jpg`;
-  return `assets/img/cards/topics/${slug}.jpg`;
+    .replace(/['’]/g, "")          // remove apostrophes
+    .replace(/[^a-z0-9]+/g, "_")   // non-alnum -> underscore
+    .replace(/^_+|_+$/g, "");      // trim underscores
+  return slug ? `${slug}.jpg` : "";
 }
 
 exports.handler = async (event) => {
@@ -68,68 +58,37 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
   }
 
-  // Image placeholder is allowed, so we can provide a default filename suggestion
-  const suggestedImage = pickImagePath(type, title);
-
-  // Force structured output + enforce non-empty summary/tags
-  const jsonSchema = {
-    name: "ItemAutofill",
-    schema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        type: { type: "string", minLength: 1 },
-        title: { type: "string", minLength: 1 },
-
-        // href may be empty OR a valid http(s) URL
-        href: { type: "string", pattern: "^(|https?://.+)$" },
-
-        // image may be empty OR a relative path without spaces
-        image: { type: "string", pattern: "^(|[^\\s]+)$" },
-
-        // summary must be non-empty (at least 20 chars is a good “not blank” guard)
-        summary: { type: "string", minLength: 20, maxLength: 320 },
-
-        // 2–6 tags, lowercase, short, hyphen allowed
-        tags: {
-          type: "array",
-          minItems: 2,
-          maxItems: 6,
-          items: { type: "string", pattern: "^[a-z0-9-]{2,24}$" },
-        },
-      },
-      required: ["type", "title", "href", "image", "summary", "tags"],
+  // JSON Schema for Structured Outputs (Responses API)
+  // IMPORTANT: According to the docs, use: text.format = { type:"json_schema", strict:true, schema:{...} }
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      type: { type: "string" },
+      title: { type: "string" },
+      href: { type: "string" },
+      image: { type: "string" },
+      summary: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
     },
-    strict: true,
+    required: ["type", "title", "href", "image", "summary", "tags"],
   };
 
-  const instructions = [
-    "You assist a factual space-settlement knowledge base editor.",
-    "Goal: propose a neutral summary + useful tags even if href/image are unknown.",
-    "",
-    "Rules:",
-    "- Be factual and conservative. Do not invent specific numbers/dates if unsure.",
-    "- href: return '' if you are not confident of an official/source URL.",
-    "- image: you MAY return a placeholder filename we can create later.",
-    "- summary: ALWAYS 1–3 neutral sentences (no hype, no marketing).",
-    "- tags: ALWAYS 2–6 lowercase tags, short (e.g. 'rocket-science', 'mars', 'habitat').",
-    "",
-    "Tag style guidance (examples):",
-    "- people: 'engineer', 'entrepreneur', 'spaceflight', 'rockets', 'mars'",
-    "- companies: 'aerospace', 'launch', 'satellites', 'infrastructure'",
-    "- topics: 'habitats', 'life-support', 'in-situ-resource', 'terraforming'",
-    "",
-    "Return JSON matching the provided schema.",
-  ].join("\n");
+  const instructions =
+    "You help fill entries for a space-settlement index.\n" +
+    "Be factual and neutral.\n" +
+    "Rules:\n" +
+    "- If you are unsure about href, return empty string.\n" +
+    "- For image: return a placeholder filename derived from the title: firstname_lastname.jpg (lowercase, underscores). No folders.\n" +
+    "- Summary: 1–3 neutral sentences, no hype, no marketing.\n" +
+    "- Tags: 2–6 short lowercase tags, comma-free strings.\n" +
+    "- Do NOT invent citations.\n";
 
-  const userInput = [
-    "Fill missing fields for this item.",
-    `title: ${title}`,
-    `type (selected): ${type}`,
-    `suggested image placeholder (ok to use): ${suggestedImage}`,
-    "current values (may be empty):",
-    JSON.stringify(current, null, 2),
-  ].join("\n");
+  const input =
+    `Create an autofill suggestion for this entry.\n` +
+    `type: ${type}\n` +
+    `title: ${title}\n` +
+    `current (may be empty):\n${JSON.stringify(current, null, 2)}\n`;
 
   try {
     const res = await fetch("https://api.openai.com/v1/responses", {
@@ -141,12 +100,13 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         instructions,
-        input: userInput,
+        input,
+        temperature: 0.2,
         text: {
           format: {
             type: "json_schema",
-            name: "ItemAutofill",
-            json_schema: jsonSchema,
+            strict: true,
+            schema,
           },
         },
       }),
@@ -155,6 +115,7 @@ exports.handler = async (event) => {
     const raw = await res.text();
 
     if (!res.ok) {
+      // Forward the OpenAI error so you see it in the editor output
       return {
         statusCode: 500,
         headers: CORS_HEADERS,
@@ -162,34 +123,41 @@ exports.handler = async (event) => {
       };
     }
 
-    const apiJson = JSON.parse(raw);
-    const out = typeof apiJson.output_text === "string" ? apiJson.output_text : "";
+    const data = JSON.parse(raw);
 
-    let obj;
+    // Responses API: most convenient is output_text (string)
+    const outText = typeof data.output_text === "string" ? data.output_text : "";
+    let obj = {};
     try {
-      obj = JSON.parse(out || "{}");
+      obj = JSON.parse(outText || "{}");
     } catch {
+      // If the SDK/format changes, still show raw for debugging
       return {
         statusCode: 500,
         headers: CORS_HEADERS,
-        body: `Model returned non-JSON output_text:\n${out}`,
+        body: `Model returned non-JSON output_text:\n${outText || "(empty)"}\n\nRAW:\n${raw}`,
       };
     }
 
-    // Defensive normalization
+    // Enforce your desired defaults
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
 
+    // href: allow empty if unknown
     obj.href = String(obj.href || "");
-    obj.image = String(obj.image || suggestedImage || ""); // default to placeholder
+
+    // image: your desired placeholder rule (vorname_nachname.jpg)
+    const fallbackImage = toImagePlaceholder(title);
+    obj.image = String(obj.image || fallbackImage);
+
+    // summary/tags
     obj.summary = String(obj.summary || "");
+    obj.tags = Array.isArray(obj.tags) ? obj.tags.map((t) => String(t).toLowerCase().trim()).filter(Boolean) : [];
 
-    obj.tags = Array.isArray(obj.tags) ? obj.tags.map((t) => String(t).toLowerCase()) : [];
+    // Safety: ensure 2–6 tags if possible (but don't force nonsense)
+    if (obj.tags.length > 6) obj.tags = obj.tags.slice(0, 6);
 
-    // If model returned empty image even though allowed, fill it:
-    if (!obj.image) obj.image = suggestedImage;
-
-    return jsonResponse(200, obj);
+    return json(200, obj);
   } catch (err) {
     return {
       statusCode: 500,
