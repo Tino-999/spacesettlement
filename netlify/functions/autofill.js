@@ -1,6 +1,6 @@
 // netlify/functions/autofill.js
-// Netlify Function with FULL CORS support + robust OpenAI Responses parsing (JSON schema)
-// Returns a single JSON object: { type,title,href,image,summary,tags }
+// Netlify Function with CORS + OpenAI Responses (Structured Outputs via text.format.schema)
+// Returns JSON: { type,title,href,image,summary,tags }
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -46,23 +46,19 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
   }
 
-  // JSON schema used by OpenAI to force structured output
-  const jsonSchema = {
-    name: "ItemAutofill",
-    schema: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        type: { type: "string" },
-        title: { type: "string" },
-        href: { type: "string" },
-        image: { type: "string" },
-        summary: { type: "string" },
-        tags: { type: "array", items: { type: "string" } },
-      },
-      required: ["type", "title", "href", "image", "summary", "tags"],
+  // IMPORTANT: For Responses API REST, use text.format.schema (not json_schema wrapper)
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      type: { type: "string" },
+      title: { type: "string" },
+      href: { type: "string" },
+      image: { type: "string" },
+      summary: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
     },
-    strict: true,
+    required: ["type", "title", "href", "image", "summary", "tags"],
   };
 
   const instructions =
@@ -91,11 +87,13 @@ exports.handler = async (event) => {
         model: "gpt-4o-mini",
         instructions,
         input: userInput,
+
+        // ✅ Structured Outputs (REST)
         text: {
           format: {
             type: "json_schema",
-            name: "ItemAutofill", // ✅ required by API for json_schema
-            json_schema: jsonSchema,
+            strict: true,
+            schema, // ← REQUIRED (fixes your error)
           },
         },
       }),
@@ -113,7 +111,7 @@ exports.handler = async (event) => {
 
     const json = JSON.parse(raw);
 
-    // Most reliable field for Responses API
+    // Responses API: output_text should contain the JSON object as a string
     const out = typeof json.output_text === "string" ? json.output_text : "";
 
     let obj;
@@ -127,7 +125,7 @@ exports.handler = async (event) => {
       };
     }
 
-    // Defensive defaults (keep shape stable)
+    // Defensive defaults
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
     obj.href = String(obj.href || "");
