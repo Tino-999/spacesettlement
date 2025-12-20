@@ -16,15 +16,23 @@ function json(statusCode, obj) {
   };
 }
 
+function text(statusCode, body) {
+  return {
+    statusCode,
+    headers: { ...CORS_HEADERS, "Content-Type": "text/plain; charset=utf-8" },
+    body: String(body ?? ""),
+  };
+}
+
 function toImagePlaceholder(title) {
   // "Elon Musk" -> "elon_musk.jpg"
   // "Gerard K. O'Neill" -> "gerard_k_oneill.jpg"
   const slug = String(title || "")
     .trim()
     .toLowerCase()
-    .replace(/['’]/g, "")          // remove apostrophes
-    .replace(/[^a-z0-9]+/g, "_")   // non-alnum -> underscore
-    .replace(/^_+|_+$/g, "");      // trim underscores
+    .replace(/['’]/g, "") // remove apostrophes
+    .replace(/[^a-z0-9]+/g, "_") // non-alnum -> underscore
+    .replace(/^_+|_+$/g, ""); // trim underscores
   return slug ? `${slug}.jpg` : "";
 }
 
@@ -35,19 +43,19 @@ exports.handler = async (event) => {
   }
 
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: CORS_HEADERS, body: "Method Not Allowed" };
+    return text(405, "Method Not Allowed");
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return { statusCode: 500, headers: CORS_HEADERS, body: "OPENAI_API_KEY missing on Netlify" };
+    return text(500, "OPENAI_API_KEY missing on Netlify");
   }
 
   let req;
   try {
     req = JSON.parse(event.body || "{}");
   } catch {
-    return { statusCode: 400, headers: CORS_HEADERS, body: "Invalid JSON body" };
+    return text(400, "Invalid JSON body");
   }
 
   const title = String(req.title || "").trim();
@@ -55,11 +63,11 @@ exports.handler = async (event) => {
   const current = req.current && typeof req.current === "object" ? req.current : {};
 
   if (!title) {
-    return { statusCode: 400, headers: CORS_HEADERS, body: "Missing title" };
+    return text(400, "Missing title");
   }
 
   // JSON Schema for Structured Outputs (Responses API)
-  // IMPORTANT: According to the docs, use: text.format = { type:"json_schema", strict:true, schema:{...} }
+  // IMPORTANT: For json_schema format, OpenAI requires a "name" field.
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -105,6 +113,7 @@ exports.handler = async (event) => {
         text: {
           format: {
             type: "json_schema",
+            name: "autofill", // REQUIRED by OpenAI (fixes: Missing required parameter: 'text.format.name')
             strict: true,
             schema,
           },
@@ -116,11 +125,7 @@ exports.handler = async (event) => {
 
     if (!res.ok) {
       // Forward the OpenAI error so you see it in the editor output
-      return {
-        statusCode: 500,
-        headers: CORS_HEADERS,
-        body: `OpenAI error ${res.status}: ${raw}`,
-      };
+      return text(500, `OpenAI error ${res.status}: ${raw}`);
     }
 
     const data = JSON.parse(raw);
@@ -132,11 +137,10 @@ exports.handler = async (event) => {
       obj = JSON.parse(outText || "{}");
     } catch {
       // If the SDK/format changes, still show raw for debugging
-      return {
-        statusCode: 500,
-        headers: CORS_HEADERS,
-        body: `Model returned non-JSON output_text:\n${outText || "(empty)"}\n\nRAW:\n${raw}`,
-      };
+      return text(
+        500,
+        `Model returned non-JSON output_text:\n${outText || "(empty)"}\n\nRAW:\n${raw}`
+      );
     }
 
     // Enforce your desired defaults
@@ -152,17 +156,15 @@ exports.handler = async (event) => {
 
     // summary/tags
     obj.summary = String(obj.summary || "");
-    obj.tags = Array.isArray(obj.tags) ? obj.tags.map((t) => String(t).toLowerCase().trim()).filter(Boolean) : [];
-
-    // Safety: ensure 2–6 tags if possible (but don't force nonsense)
-    if (obj.tags.length > 6) obj.tags = obj.tags.slice(0, 6);
+    obj.tags = Array.isArray(obj.tags)
+      ? obj.tags
+          .map((t) => String(t).toLowerCase().trim())
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
 
     return json(200, obj);
   } catch (err) {
-    return {
-      statusCode: 500,
-      headers: CORS_HEADERS,
-      body: `Function error: ${err?.message || err}`,
-    };
+    return text(500, `Function error: ${err?.message || err}`);
   }
 };
