@@ -74,5 +74,16 @@
     "Human spaceflight",
     "Mars settlement"
   ]
+},
+{
+  "type": "person",
+  "title": "Hermann Julius Oberth",
+  "href": "https://en.wikipedia.org/wiki/Hermann_Oberth",
+  "image": "assets/img/cards/people/Hermann_Oberth.jpg",
+  "summary": "Physisist and Engineer, provided the first rigorous scientific proof that rockets could enable human spaceflight, thereby laying the foundation for later concepts of space settlement.",
+  "tags": [
+    "Technical feasibility",
+    "Rocket theory"
+  ]
 }
 ]
