@@ -1,14 +1,11 @@
 // assets/js/app.js
-// Loads items either from Netlify Blobs API (recommended) or from static data/items.json (fallback).
+// Loads items from Cloudflare Worker API (/items) backed by D1.
 // Provides simple search + type filter and renders cards into #cards.
 
-const NETLIFY_ORIGIN = "https://inquisitive-sunshine-0cfe6a.netlify.app";
+const WORKER_BASE =
+  "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
 
-const IS_NETLIFY = location.hostname.endsWith("netlify.app");
-
-// On Netlify, same-origin functions work. Else (GitHub Pages), fallback to static JSON.
-// Note: You *can* call Netlify cross-origin, but for now we keep GH Pages as a static demo.
-const ITEMS_URL = IS_NETLIFY ? "/.netlify/functions/items" : "data/items.json";
+const ITEMS_URL = `${WORKER_BASE}/items`;
 
 const els = {
   q: document.getElementById("q"),
@@ -37,12 +34,23 @@ function normalizeText(s) {
     .replace(/\p{Diacritic}/gu, "");
 }
 
+function isLikelyUrlOrPath(s) {
+  const v = String(s || "").trim();
+  if (!v) return false;
+  return v.includes("/") || v.startsWith("http://") || v.startsWith("https://");
+}
+
 function resolveImagePath(item) {
+  // Prefer remote imageUrl (new model)
+  const imageUrl = String(item?.imageUrl ?? "").trim();
+  if (imageUrl) return imageUrl;
+
+  // Backward-compatible fallback: local "image" filename or already-full URL/path
   const img = String(item?.image ?? "").trim();
   if (!img) return "";
 
   // If already a full/relative path or URL, don't touch it
-  if (img.includes("/") || img.startsWith("http://") || img.startsWith("https://")) return img;
+  if (isLikelyUrlOrPath(img)) return img;
 
   const type = String(item?.type ?? "").trim().toLowerCase();
 
@@ -63,17 +71,16 @@ function resolveImagePath(item) {
   return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
 }
 
-
 async function loadItems() {
   const res = await fetch(ITEMS_URL, { cache: "no-store" });
   const data = await res.json();
 
-  // Netlify function returns { ok:true, items:[...] }
+  // Worker returns { ok:true, items:[...] }
   if (data && typeof data === "object" && Array.isArray(data.items)) {
     return data.items;
   }
 
-  // Static file returns [...]
+  // If you ever use a raw array response
   if (Array.isArray(data)) {
     return data;
   }
@@ -93,7 +100,6 @@ function passesFilter(item, q, filter) {
   const type = String(item.type ?? "").toLowerCase();
 
   if (filter !== "all" && type !== filter) return false;
-
   if (!q) return true;
 
   const hay = [
@@ -113,18 +119,18 @@ function formatPersonTitle(title, birthYear, deathYear) {
   if (birthYear == null && deathYear == null) {
     return title;
   }
-  
+
   let yearStr = "";
   if (birthYear != null) {
     yearStr = String(birthYear);
   }
-  
+
   if (deathYear != null) {
     yearStr += "-" + String(deathYear);
   } else if (birthYear != null) {
     yearStr += "-";
   }
-  
+
   return yearStr ? `${title} (${yearStr})` : title;
 }
 
@@ -156,8 +162,10 @@ function render(items) {
 
       // For persons, add birth/death years to title
       if (type === "person") {
-        const birthYear = item.birthYear != null ? parseInt(item.birthYear, 10) : null;
-        const deathYear = item.deathYear != null ? parseInt(item.deathYear, 10) : null;
+        const birthYear =
+          item.birthYear != null ? parseInt(item.birthYear, 10) : null;
+        const deathYear =
+          item.deathYear != null ? parseInt(item.deathYear, 10) : null;
         title = escapeHtml(formatPersonTitle(item.title || "", birthYear, deathYear));
       }
 
@@ -224,7 +232,9 @@ async function init() {
           <div class="card__row" style="grid-template-columns:1fr">
             <div class="card__content">
               <div class="card__kicker">Error</div>
-              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(e?.message || e)}</pre>
+              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(
+                e?.message || e
+              )}</pre>
             </div>
           </div>
         </div>
@@ -235,20 +245,15 @@ async function init() {
 
   // Sort: persons by birthYear (ascending), others by title
   allItems.sort((a, b) => {
-    // For persons, sort by birthYear if available
     if (a.type === "person" && b.type === "person") {
       const aYear = a.birthYear != null ? parseInt(a.birthYear, 10) : null;
       const bYear = b.birthYear != null ? parseInt(b.birthYear, 10) : null;
-      
-      if (aYear != null && bYear != null) {
-        return aYear - bYear;
-      }
-      if (aYear != null) return -1; // a has year, b doesn't -> a first
-      if (bYear != null) return 1;  // b has year, a doesn't -> b first
-      // Both null, fall through to title sort
+
+      if (aYear != null && bYear != null) return aYear - bYear;
+      if (aYear != null) return -1;
+      if (bYear != null) return 1;
     }
-    
-    // Default: title asc (stable, nice for browsing)
+
     return String(a.title || "").localeCompare(String(b.title || ""));
   });
 

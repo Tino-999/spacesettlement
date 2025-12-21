@@ -3,19 +3,16 @@
 const output = document.getElementById("output");
 const publishedEl = document.getElementById("published");
 
-// Netlify Functions (same-origin, relative paths)
-const AUTOFILL_URL = "/.netlify/functions/autofill";
-const ITEMS_URL = "/.netlify/functions/items";
-// Cloudflare Worker API base (dein Worker)
-const WORKER_BASE = "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
-const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
+// Cloudflare Worker API base
+const WORKER_BASE =
+  "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
 
-// Helper: check if we are likely running with functions available.
-// Netlify production: https and hostname includes netlify.app or custom domain.
-// Netlify Dev: usually http://localhost:8888 with /.netlify/functions proxied.
-// Plain static server: functions are NOT available.
-const IS_LOCALHOST =
-  location.hostname === "localhost" || location.hostname === "127.0.0.1";
+// Endpoints
+const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
+const ITEMS_URL = `${WORKER_BASE}/items`;
+
+// Autofill bleibt vorerst auf Netlify (kann später auch umziehen)
+const AUTOFILL_URL = "/.netlify/functions/autofill";
 
 function $(id) {
   return document.getElementById(id);
@@ -39,15 +36,15 @@ function buildItem() {
     .map((t) => t.trim())
     .filter(Boolean);
 
-const item = {
-  type: getValue("type"),
-  title: getValue("title"),
-  href: getValue("href"),
-  image: getValue("image"),
-  imageUrl: getValue("imageUrl"),
-  summary: getValue("summary"),
-  tags,
-};
+  const item = {
+    type: getValue("type"),
+    title: getValue("title"),
+    href: getValue("href"),
+    image: getValue("image"), // legacy fallback
+    imageUrl: getValue("imageUrl"), // new
+    summary: getValue("summary"),
+    tags,
+  };
 
   if (item.type === "person") {
     const birthYear = getValue("birthYear");
@@ -89,6 +86,14 @@ function setOutput(text) {
   output.textContent = String(text ?? "");
 }
 
+function askAdminTokenOrNull(purpose = "Admin token (x-admin-token):") {
+  const token = prompt(purpose);
+  return token && token.trim() ? token.trim() : null;
+}
+
+// -------------------------
+// IMAGE UPLOAD (R2 via Worker)
+// -------------------------
 async function uploadImageToR2() {
   const fileInput = document.getElementById("imageFile");
   const urlInput = document.getElementById("imageUrl");
@@ -97,13 +102,14 @@ async function uploadImageToR2() {
     setOutput('Fehler: <input id="imageFile"> nicht gefunden.');
     return;
   }
+
   const file = fileInput.files && fileInput.files[0];
   if (!file) {
     setOutput("Bitte zuerst eine Bilddatei auswählen.");
     return;
   }
 
-  const token = prompt("Admin token (x-admin-token):");
+  const token = askAdminTokenOrNull("Admin token (x-admin-token) für Upload:");
   if (!token) {
     setOutput("Upload abgebrochen (kein Token).");
     return;
@@ -127,7 +133,6 @@ async function uploadImageToR2() {
     const parsed = await safeReadJson(res);
 
     if (!res.ok) {
-      if (btn) btn.disabled = false;
       setOutput(
         `Upload-Fehler (HTTP ${res.status}):\n` +
           (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
@@ -137,16 +142,11 @@ async function uploadImageToR2() {
 
     const data = parsed.ok ? parsed.json : null;
     if (!data || !data.imageUrl) {
-      if (btn) btn.disabled = false;
       setOutput("Upload ok, aber keine imageUrl in der Antwort.");
       return;
     }
 
     if (urlInput) urlInput.value = data.imageUrl;
-
-    // Optional: altes image-Feld leeren (wenn du nur noch URLs willst)
-    // const imageEl = document.getElementById("image");
-    // if (imageEl) imageEl.value = "";
 
     setOutput("✔ Upload ok\n\n" + JSON.stringify(data, null, 2));
   } catch (e) {
@@ -155,7 +155,6 @@ async function uploadImageToR2() {
     if (btn) btn.disabled = false;
   }
 }
-
 
 // -------------------------
 // AI AUTOFILL (preview only)
@@ -208,7 +207,7 @@ async function autofillFromAI() {
   }
 
   setValue("href", data.href);
-  setValue("image", data.image);
+  setValue("image", data.image); // legacy fallback
   setValue("summary", data.summary);
   setValue("tags", data.tags);
 
@@ -236,20 +235,17 @@ async function autofillFromAI() {
 }
 
 // -------------------------
-// PUBLISH
+// PUBLISH (to Worker /items -> D1)
 // -------------------------
 async function publishItem() {
-  // Hinweis für lokalen Static-Server ohne Functions
-  if (IS_LOCALHOST) {
-    setOutput(
-      "Publish deaktiviert auf localhost ohne Netlify Functions.\n" +
-      "Starte über Netlify Dev oder teste Publish auf der Netlify-URL.\n" +
-      `Ziel wäre: POST ${ITEMS_URL}`
-    );
+  const item = buildItem();
+
+  const token = askAdminTokenOrNull("Admin token (x-admin-token) für Publish:");
+  if (!token) {
+    setOutput("Publish abgebrochen (kein Token).");
     return;
   }
 
-  const item = buildItem();
   setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
 
   let res;
@@ -258,17 +254,15 @@ async function publishItem() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-admin-token": token,
       },
       body: JSON.stringify(item),
     });
   } catch (e) {
     setOutput(
       "Publish Fehler: Failed to fetch\n\n" +
-      "Ursachen:\n" +
-      "- Function nicht deployed oder falscher Function-Name.\n" +
-      "- Netzwerk/Adblocker blockiert /.netlify/functions.\n\n" +
-      `Request: POST ${ITEMS_URL}\n` +
-      `Browser-Fehler: ${e?.message || e}`
+        `Request: POST ${ITEMS_URL}\n` +
+        `Browser-Fehler: ${e?.message || e}`
     );
     return;
   }
@@ -290,17 +284,10 @@ async function publishItem() {
 }
 
 // -------------------------
-// LIST + DELETE
+// LIST + DELETE (from Worker /items -> D1)
 // -------------------------
 async function loadPublished() {
   if (!publishedEl) return;
-
-  // Lokal ohne Functions: nur Hinweis.
-  if (IS_LOCALHOST) {
-    publishedEl.textContent =
-      "Published items nicht verfügbar auf localhost ohne Netlify Functions.";
-    return;
-  }
 
   publishedEl.textContent = `Loading…\nGET ${ITEMS_URL}`;
 
@@ -312,8 +299,8 @@ async function loadPublished() {
       `<pre class="code" style="white-space:pre-wrap;">` +
       escapeHtml(
         "Netzwerkfehler (list): Failed to fetch\n" +
-        `GET ${ITEMS_URL}\n` +
-        (e?.message || e)
+          `GET ${ITEMS_URL}\n` +
+          (e?.message || e)
       ) +
       `</pre>`;
     return;
@@ -349,8 +336,8 @@ async function loadPublished() {
           const title = escapeHtml(it.title || "");
           const type = escapeHtml(it.type || "");
           const createdAt = escapeHtml(it.createdAt || "");
-          const key = escapeHtml(it._key || "");
           const id = escapeHtml(it.id || "");
+
           return `
             <div style="display:flex; align-items:center; gap:10px; justify-content:space-between; border:1px solid rgba(255,255,255,0.08); padding:10px; border-radius:14px;">
               <div style="min-width:0;">
@@ -362,7 +349,7 @@ async function loadPublished() {
                 <button class="btn btn--ghost" data-load='${escapeHtml(
                   JSON.stringify(it)
                 ).replace(/'/g, "&#039;")}'>Load</button>
-                <button class="btn" data-del-key="${key}">Delete</button>
+                <button class="btn" data-del-id="${id}">Delete</button>
               </div>
             </div>
           `;
@@ -376,10 +363,12 @@ async function loadPublished() {
     btn.addEventListener("click", () => {
       try {
         const it = JSON.parse(btn.getAttribute("data-load"));
+
         setValue("type", it.type);
         setValue("title", it.title);
         setValue("href", it.href);
-        setValue("image", it.image);
+        setValue("image", it.image); // legacy fallback
+        setValue("imageUrl", it.imageUrl); // new
         setValue("summary", it.summary);
         setValue("tags", Array.isArray(it.tags) ? it.tags : []);
 
@@ -399,16 +388,23 @@ async function loadPublished() {
   });
 
   // Delete
-  publishedEl.querySelectorAll("button[data-del-key]").forEach((btn) => {
+  publishedEl.querySelectorAll("button[data-del-id]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const key = btn.getAttribute("data-del-key");
-      if (!key) return;
+      const id = btn.getAttribute("data-del-id");
+      if (!id) return;
       if (!confirm("Delete this item?")) return;
+
+      const token = askAdminTokenOrNull("Admin token (x-admin-token) für Delete:");
+      if (!token) {
+        alert("Delete abgebrochen (kein Token).");
+        return;
+      }
 
       let delRes;
       try {
-        delRes = await fetch(`${ITEMS_URL}?key=${encodeURIComponent(key)}`, {
+        delRes = await fetch(`${ITEMS_URL}?id=${encodeURIComponent(id)}`, {
           method: "DELETE",
+          headers: { "x-admin-token": token },
         });
       } catch (e) {
         alert("Delete failed: Failed to fetch\n" + (e?.message || e));
@@ -452,11 +448,10 @@ $("uploadImage")?.addEventListener("click", () => {
   uploadImageToR2().catch((err) => {
     console.error(err);
     setOutput(`Upload Fehler: ${err?.message || err}`);
-    const btn = $("uploadImage");
-    if (btn) btn.disabled = false;
+    const b = $("uploadImage");
+    if (b) b.disabled = false;
   });
 });
-
 
 $("refreshList")?.addEventListener("click", () => {
   loadPublished().catch(console.error);
