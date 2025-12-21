@@ -154,6 +154,10 @@ exports.handler = async (event) => {
   const tagPattern = "^[a-z0-9][a-z0-9_-]*$";
   const imagePattern = "^[a-z0-9][a-z0-9_]*\\.jpg$";
 
+  // Build schema dynamically - for persons, birthYear and deathYear are required
+  const baseRequired = ["type", "title", "href", "image", "summary", "tags"];
+  const personRequired = type === "person" ? ["birthYear", "deathYear"] : [];
+  
   const schema = {
     type: "object",
     additionalProperties: false,
@@ -171,9 +175,22 @@ exports.handler = async (event) => {
         maxItems: 6,
         items: { type: "string", minLength: 2, maxLength: 24, pattern: tagPattern },
       },
+      // For persons: birth and death years
+      birthYear: { type: "integer", minimum: 0, maximum: 2100 },
+      deathYear: { 
+        anyOf: [
+          { type: "integer", minimum: 0, maximum: 2100 },
+          { type: "null" }
+        ]
+      },
     },
-    required: ["type", "title", "href", "image", "summary", "tags"],
+    required: [...baseRequired, ...personRequired],
   };
+
+  // Debug log for schema
+  if (type === "person") {
+    console.log("[autofill] Schema for person - required fields:", schema.required);
+  }
 
   const instructions =
     "You help fill entries for a space-settlement index.\n" +
@@ -187,13 +204,21 @@ exports.handler = async (event) => {
     "  (1) Why is the person recognized among scientists?\n" +
     "  (2) What is their contribution to space settlement?\n" +
     "  If either is not verifiable from the provided context, explicitly say so (e.g., 'Not established from provided context').\n" +
-    "- Tags: 2–6 short lowercase slug tags (letters/numbers/underscore/hyphen only).\n";
+    "- Tags: 2–6 short lowercase slug tags (letters/numbers/underscore/hyphen only).\n" +
+    "- birthYear: For persons (type='person'), you MUST ALWAYS provide the birth year as an integer (e.g., 1971). Look up the information if needed.\n" +
+    "- deathYear: For persons (type='person'), you MUST ALWAYS provide either: (a) the death year as an integer if the person is deceased (e.g., 2023), OR (b) null if the person is still alive. Look up the information if needed.\n";
 
   const input =
     `Create an autofill suggestion for this entry.\n` +
     `type: ${type}\n` +
     `title: ${title}\n` +
-    `current (may be empty):\n${JSON.stringify(current, null, 2)}\n`;
+    `current (may be empty):\n${JSON.stringify(current, null, 2)}\n` +
+    (type === "person" 
+      ? `\nIMPORTANT: Since this is a person (type='person'), you MUST ALWAYS include birthYear and deathYear in your response.\n` +
+        `- birthYear: integer (e.g., 1971) - REQUIRED, look up if needed\n` +
+        `- deathYear: integer if deceased (e.g., 2023), or null if still alive - REQUIRED, look up if needed\n` +
+        `Do NOT omit these fields. They are required for persons.\n`
+      : ``);
 
   const openaiPayload = {
     model: "gpt-4o-mini",
@@ -231,6 +256,14 @@ exports.handler = async (event) => {
     const extracted = extractStructuredJson(data);
     if (!extracted) {
       return text(500, `Could not extract structured JSON from OpenAI response.\nRAW:\n${raw}`);
+    }
+
+    // Debug: Log what the AI returned (for persons)
+    if (type === "person") {
+      console.log("[autofill] Person detected, extracted:", JSON.stringify(extracted, null, 2));
+      console.log("[autofill] birthYear:", extracted.birthYear, "type:", typeof extracted.birthYear);
+      console.log("[autofill] deathYear:", extracted.deathYear, "type:", typeof extracted.deathYear);
+      console.log("[autofill] Schema required fields:", schema.required);
     }
 
     const wikiUrl = await wikiPromise;
@@ -273,6 +306,22 @@ exports.handler = async (event) => {
       if (next && !tags.includes(next)) tags.push(next);
     }
     obj.tags = tags.slice(0, 6);
+
+    // For persons, include birthYear and deathYear if provided
+    if (type === "person") {
+      // Always try to include birthYear if the AI provided it
+      if (extracted.birthYear != null && typeof extracted.birthYear === "number") {
+        obj.birthYear = extracted.birthYear;
+      }
+      // Handle deathYear: if number, person is deceased; if null, person is alive
+      if (extracted.deathYear != null && typeof extracted.deathYear === "number") {
+        obj.deathYear = extracted.deathYear;
+      } else if (extracted.deathYear === null) {
+        // Person is still alive - set to null explicitly so frontend knows to clear the field
+        obj.deathYear = null;
+      }
+      // If deathYear is undefined, the AI didn't provide it - we also don't set it
+    }
 
     return json(200, obj);
   } catch (err) {

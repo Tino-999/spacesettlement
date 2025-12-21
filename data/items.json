@@ -1,11 +1,13 @@
 [
   {
     "type": "person",
-    "title": "Gerard K. O’Neill",
+    "title": "Gerard K. O'Neill",
     "href": "https://en.wikipedia.org/wiki/Gerard_K._O%27Neill",
     "image": "assets/img/cards/people/ONeill.gif",
     "summary": "Physicist Proposed large-scale space habitats and framed an economic path to permanent off-world living.",
-    "tags": ["habitats", "space industry", "infrastructure"]
+    "tags": ["habitats", "space industry", "infrastructure"],
+    "birthYear": 1927,
+    "deathYear": 1992
   },
   {
     "type": "project",
@@ -60,8 +62,9 @@
     "title": "Michio Kaku",
     "href": "https://en.wikipedia.org/wiki/Michio_Kaku",
     "image": "assets/img/cards/people/michio_kaku.jpg",
-    "summary": "Theoretical physicist and co-founder of string field theory, advanced space settlement by popularizing O’Neill colonies and Dyson structures for a broad audience.",
-    "tags": ["O’Neill colonies", "Dyson structures", "String theory"]
+    "summary": "Theoretical physicist and co-founder of string field theory, advanced space settlement by popularizing O'Neill colonies and Dyson structures for a broad audience.",
+    "tags": ["O'Neill colonies", "Dyson structures", "String theory"],
+    "birthYear": 1947
   },
 {
   "type": "person",
@@ -73,7 +76,8 @@
     "SpaceX",
     "Human spaceflight",
     "Mars settlement"
-  ]
+  ],
+  "birthYear": 1979
 },
 {
   "type": "person",
@@ -84,6 +88,8 @@
   "tags": [
     "Technical feasibility",
     "Rocket theory"
-  ]
+  ],
+  "birthYear": 1894,
+  "deathYear": 1989
 }
 ]

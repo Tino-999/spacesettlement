@@ -38,7 +38,7 @@ function buildItem() {
     .map((t) => t.trim())
     .filter(Boolean);
 
-  return {
+  const item = {
     type: getValue("type"),
     title: getValue("title"),
     href: getValue("href"),
@@ -46,6 +46,22 @@ function buildItem() {
     summary: getValue("summary"),
     tags,
   };
+
+  // Add birthYear and deathYear for persons
+  if (item.type === "person") {
+    const birthYear = getValue("birthYear");
+    const deathYear = getValue("deathYear");
+    if (birthYear) {
+      const year = parseInt(birthYear, 10);
+      if (!isNaN(year)) item.birthYear = year;
+    }
+    if (deathYear) {
+      const year = parseInt(deathYear, 10);
+      if (!isNaN(year)) item.deathYear = year;
+    }
+  }
+
+  return item;
 }
 
 async function safeReadJson(res) {
@@ -106,10 +122,42 @@ async function autofillFromAI() {
     return;
   }
 
+  // Debug: Log the response to see what we got
+  console.log("Autofill response:", data);
+  console.log("birthYear:", data.birthYear, "type:", typeof data.birthYear);
+  console.log("deathYear:", data.deathYear, "type:", typeof data.deathYear);
+
   setValue("href", data.href);
   setValue("image", data.image);
   setValue("summary", data.summary);
   setValue("tags", data.tags);
+
+  // Set birthYear and deathYear if present (for persons)
+  const currentType = getValue("type");
+  if (currentType === "person") {
+    // Always try to set birthYear and deathYear for persons
+    if (data.birthYear != null && typeof data.birthYear === "number") {
+      setValue("birthYear", String(data.birthYear));
+      console.log("Set birthYear to:", data.birthYear);
+    } else {
+      // Clear if not provided
+      setValue("birthYear", "");
+      console.log("birthYear not provided or invalid");
+    }
+    
+    if (data.deathYear != null && typeof data.deathYear === "number") {
+      setValue("deathYear", String(data.deathYear));
+      console.log("Set deathYear to:", data.deathYear);
+    } else {
+      // Person is still alive (deathYear is null) or unknown (deathYear is undefined) - clear the field
+      setValue("deathYear", "");
+      console.log("deathYear is", data.deathYear === null ? "null (person alive)" : "not provided");
+    }
+  } else {
+    // Clear fields if not a person
+    setValue("birthYear", "");
+    setValue("deathYear", "");
+  }
 
   output.textContent = JSON.stringify(buildItem(), null, 2);
 
@@ -219,6 +267,14 @@ async function loadPublished() {
         setValue("image", it.image);
         setValue("summary", it.summary);
         setValue("tags", Array.isArray(it.tags) ? it.tags : []);
+        // Load birthYear and deathYear for persons
+        if (it.type === "person") {
+          setValue("birthYear", it.birthYear != null ? String(it.birthYear) : "");
+          setValue("deathYear", it.deathYear != null ? String(it.deathYear) : "");
+        } else {
+          setValue("birthYear", "");
+          setValue("deathYear", "");
+        }
         output.textContent = JSON.stringify(buildItem(), null, 2);
       } catch (e) {
         console.error(e);
@@ -278,5 +334,19 @@ $("refreshList")?.addEventListener("click", () => {
   loadPublished().catch(console.error);
 });
 
+// Show/hide person fields based on type
+$("type")?.addEventListener("change", () => {
+  const personFields = document.getElementById("personFields");
+  if (personFields) {
+    personFields.style.display = getValue("type") === "person" ? "block" : "none";
+  }
+});
+
 // initial
 loadPublished().catch(console.error);
+
+// Show/hide person fields on page load
+const personFields = document.getElementById("personFields");
+if (personFields) {
+  personFields.style.display = getValue("type") === "person" ? "block" : "none";
+}

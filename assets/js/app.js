@@ -109,6 +109,25 @@ function passesFilter(item, q, filter) {
   return hay.includes(q);
 }
 
+function formatPersonTitle(title, birthYear, deathYear) {
+  if (birthYear == null && deathYear == null) {
+    return title;
+  }
+  
+  let yearStr = "";
+  if (birthYear != null) {
+    yearStr = String(birthYear);
+  }
+  
+  if (deathYear != null) {
+    yearStr += "-" + String(deathYear);
+  } else if (birthYear != null) {
+    yearStr += "-";
+  }
+  
+  return yearStr ? `${title} (${yearStr})` : title;
+}
+
 function render(items) {
   if (!els.cards) return;
 
@@ -128,12 +147,19 @@ function render(items) {
 
   els.cards.innerHTML = items
     .map((item) => {
-      const title = escapeHtml(item.title || "");
+      let title = escapeHtml(item.title || "");
       const href = escapeHtml(item.href || "");
       const summary = escapeHtml(item.summary || "");
       const tags = Array.isArray(item.tags) ? item.tags : [];
       const imagePath = escapeHtml(resolveImagePath(item));
       const type = escapeHtml(item.type || "");
+
+      // For persons, add birth/death years to title
+      if (type === "person") {
+        const birthYear = item.birthYear != null ? parseInt(item.birthYear, 10) : null;
+        const deathYear = item.deathYear != null ? parseInt(item.deathYear, 10) : null;
+        title = escapeHtml(formatPersonTitle(item.title || "", birthYear, deathYear));
+      }
 
       // If href is "kein Wiki" (from your autofill rules), don't make it a link.
       const hasLink = href && href !== "kein Wiki";
@@ -207,8 +233,24 @@ async function init() {
     return;
   }
 
-  // Default sort: title asc (stable, nice for browsing)
-  allItems.sort((a, b) => String(a.title || "").localeCompare(String(b.title || "")));
+  // Sort: persons by birthYear (ascending), others by title
+  allItems.sort((a, b) => {
+    // For persons, sort by birthYear if available
+    if (a.type === "person" && b.type === "person") {
+      const aYear = a.birthYear != null ? parseInt(a.birthYear, 10) : null;
+      const bYear = b.birthYear != null ? parseInt(b.birthYear, 10) : null;
+      
+      if (aYear != null && bYear != null) {
+        return aYear - bYear;
+      }
+      if (aYear != null) return -1; // a has year, b doesn't -> a first
+      if (bYear != null) return 1;  // b has year, a doesn't -> b first
+      // Both null, fall through to title sort
+    }
+    
+    // Default: title asc (stable, nice for browsing)
+    return String(a.title || "").localeCompare(String(b.title || ""));
+  });
 
   // Wire chips
   els.chips.forEach((btn) => {
