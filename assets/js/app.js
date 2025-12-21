@@ -41,17 +41,28 @@ function resolveImagePath(item) {
   const img = String(item?.image ?? "").trim();
   if (!img) return "";
 
-  // Already a path like "assets/img/cards/people/x.jpg"
-  if (img.includes("/")) return img;
+  // If already a full/relative path or URL, don't touch it
+  if (img.includes("/") || img.startsWith("http://") || img.startsWith("https://")) return img;
 
-  // If only a filename like "elon_musk.jpg"
   const type = String(item?.type ?? "").trim().toLowerCase();
 
-  if (type === "person") return `assets/img/cards/people/${img}`;
+  // Map item.type -> folder name under assets/img/cards/
+  const folderByType = {
+    person: "people",
+    project: "projects",
+    concept: "concepts",
+    org: "orgs",
+    topic: "topics",
+    book: "books",
+    movie: "movies",
+  };
 
-  // Generic fallback for non-person types
-  return `assets/img/cards/${img}`;
+  const folder = folderByType[type];
+
+  // If we know the folder, use it. Otherwise fall back to assets/img/cards/<filename>
+  return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
 }
+
 
 async function loadItems() {
   const res = await fetch(ITEMS_URL, { cache: "no-store" });
