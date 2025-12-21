@@ -11,7 +11,7 @@ const WORKER_BASE =
 const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
 const ITEMS_URL = `${WORKER_BASE}/items`;
 
-// Autofill bleibt vorerst auf Netlify (kann später auch umziehen)
+// Autofill bleibt vorerst auf Netlify
 const AUTOFILL_URL = "/.netlify/functions/autofill";
 
 function $(id) {
@@ -30,6 +30,47 @@ function setValue(id, value) {
   else el.value = String(value);
 }
 
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  }[m]));
+}
+
+function setOutput(text) {
+  if (output) output.textContent = String(text ?? "");
+}
+
+async function safeReadJson(res) {
+  const text = await res.text();
+  try {
+    return { ok: true, json: JSON.parse(text), raw: text };
+  } catch {
+    return { ok: false, raw: text };
+  }
+}
+
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags.map(String).filter(Boolean);
+
+  if (typeof tags === "string") {
+    const t = tags.trim();
+    if (!t) return [];
+    // JSON string from D1?
+    try {
+      const parsed = JSON.parse(t);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {}
+    // fallback: comma separated
+    return t.split(",").map((x) => x.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
 function buildItem() {
   const tags = getValue("tags")
     .split(",")
@@ -40,7 +81,7 @@ function buildItem() {
     type: getValue("type"),
     title: getValue("title"),
     href: getValue("href"),
-    image: getValue("image"), // legacy fallback
+    // image: getValue("image"), // legacy optional, wird NICHT mehr published
     imageUrl: getValue("imageUrl"), // new
     summary: getValue("summary"),
     tags,
@@ -54,6 +95,7 @@ function buildItem() {
       const year = parseInt(birthYear, 10);
       if (!isNaN(year)) item.birthYear = year;
     }
+
     if (deathYear) {
       const year = parseInt(deathYear, 10);
       if (!isNaN(year)) item.deathYear = year;
@@ -63,31 +105,8 @@ function buildItem() {
   return item;
 }
 
-async function safeReadJson(res) {
-  const text = await res.text();
-  try {
-    return { ok: true, json: JSON.parse(text), raw: text };
-  } catch {
-    return { ok: false, raw: text };
-  }
-}
-
-function escapeHtml(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  }[m]));
-}
-
-function setOutput(text) {
-  output.textContent = String(text ?? "");
-}
-
-function askAdminTokenOrNull(purpose = "Admin token (x-admin-token):") {
-  const token = prompt(purpose);
+function requireAdminToken(actionLabel) {
+  const token = prompt(`Admin token (x-admin-token) für ${actionLabel}:`);
   return token && token.trim() ? token.trim() : null;
 }
 
@@ -95,8 +114,8 @@ function askAdminTokenOrNull(purpose = "Admin token (x-admin-token):") {
 // IMAGE UPLOAD (R2 via Worker)
 // -------------------------
 async function uploadImageToR2() {
-  const fileInput = document.getElementById("imageFile");
-  const urlInput = document.getElementById("imageUrl");
+  const fileInput = $("imageFile");
+  const urlInput = $("imageUrl");
 
   if (!fileInput) {
     setOutput('Fehler: <input id="imageFile"> nicht gefunden.');
@@ -109,13 +128,13 @@ async function uploadImageToR2() {
     return;
   }
 
-  const token = askAdminTokenOrNull("Admin token (x-admin-token) für Upload:");
+  const token = requireAdminToken("Upload");
   if (!token) {
     setOutput("Upload abgebrochen (kein Token).");
     return;
   }
 
-  const btn = document.getElementById("uploadImage");
+  const btn = $("uploadImage");
   if (btn) btn.disabled = true;
 
   try {
@@ -123,9 +142,6 @@ async function uploadImageToR2() {
 
     const fd = new FormData();
     fd.append("file", file, file.name);
-
-    // NEW: send the item type so the worker can store under cards/<folder>/
-    fd.append("type", getValue("type"));
 
     const res = await fetch(UPLOAD_URL, {
       method: "POST",
@@ -210,9 +226,13 @@ async function autofillFromAI() {
   }
 
   setValue("href", data.href);
-  setValue("image", data.image); // legacy fallback
   setValue("summary", data.summary);
   setValue("tags", data.tags);
+
+  // Wichtig: imageUrl kommt NICHT aus Autofill, sondern aus Upload.
+  // Wir lassen imageUrl so wie es ist.
+  // Wenn du willst, kannst du es hier leeren:
+  // setValue("imageUrl", "");
 
   const currentType = getValue("type");
   if (currentType === "person") {
@@ -233,7 +253,6 @@ async function autofillFromAI() {
   }
 
   setOutput(JSON.stringify(buildItem(), null, 2));
-
   if (btn) btn.disabled = false;
 }
 
@@ -241,13 +260,26 @@ async function autofillFromAI() {
 // PUBLISH (to Worker /items -> D1)
 // -------------------------
 async function publishItem() {
-  const item = buildItem();
-
-  const token = askAdminTokenOrNull("Admin token (x-admin-token) für Publish:");
+  const token = requireAdminToken("Publish");
   if (!token) {
     setOutput("Publish abgebrochen (kein Token).");
     return;
   }
+
+  const item = buildItem();
+
+  // Hard rule: Worker/D1 hat kein "image" Feld mehr.
+  // Publish nur das neue Modell.
+  const payload = {
+    type: item.type,
+    title: item.title,
+    href: item.href,
+    imageUrl: item.imageUrl,
+    summary: item.summary,
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    birthYear: item.birthYear ?? null,
+    deathYear: item.deathYear ?? null,
+  };
 
   setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
 
@@ -259,7 +291,7 @@ async function publishItem() {
         "Content-Type": "application/json",
         "x-admin-token": token,
       },
-      body: JSON.stringify(item),
+      body: JSON.stringify(payload),
     });
   } catch (e) {
     setOutput(
@@ -370,10 +402,15 @@ async function loadPublished() {
         setValue("type", it.type);
         setValue("title", it.title);
         setValue("href", it.href);
-        setValue("image", it.image); // legacy fallback
-        setValue("imageUrl", it.imageUrl); // new
+
+        // legacy image field exists maybe in UI; we ignore it for publish
+        // setValue("image", it.image);
+
+        setValue("imageUrl", it.imageUrl || "");
         setValue("summary", it.summary);
-        setValue("tags", Array.isArray(it.tags) ? it.tags : []);
+
+        const tags = normalizeTags(it.tags);
+        setValue("tags", tags);
 
         if (it.type === "person") {
           setValue("birthYear", it.birthYear != null ? String(it.birthYear) : "");
@@ -397,7 +434,7 @@ async function loadPublished() {
       if (!id) return;
       if (!confirm("Delete this item?")) return;
 
-      const token = askAdminTokenOrNull("Admin token (x-admin-token) für Delete:");
+      const token = requireAdminToken("Delete");
       if (!token) {
         alert("Delete abgebrochen (kein Token).");
         return;
@@ -436,7 +473,8 @@ $("autofill")?.addEventListener("click", () => {
   autofillFromAI().catch((err) => {
     console.error(err);
     setOutput(`Auto-Fill Fehler: ${err?.message || err}`);
-    $("autofill").disabled = false;
+    const b = $("autofill");
+    if (b) b.disabled = false;
   });
 });
 
