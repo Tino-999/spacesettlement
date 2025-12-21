@@ -124,6 +124,9 @@ async function uploadImageToR2() {
     const fd = new FormData();
     fd.append("file", file, file.name);
 
+    // NEW: send the item type so the worker can store under cards/<folder>/
+    fd.append("type", getValue("type"));
+
     const res = await fetch(UPLOAD_URL, {
       method: "POST",
       headers: { "x-admin-token": token },
