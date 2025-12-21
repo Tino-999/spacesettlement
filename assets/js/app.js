@@ -136,6 +136,8 @@ function render(items) {
                   ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">`
                   : ``
               }
+              <!-- Fade is INSIDE media so it never dims the text -->
+              <div class="card__fade" aria-hidden="true"></div>
             </div>
 
             <div class="card__content">
@@ -154,17 +156,12 @@ function render(items) {
               ${
                 tags.length
                   ? `<div class="card__meta" aria-label="tags">
-                      ${tags
-                        .map((t) => `<span class="tag">${escapeHtml(t)}</span>`)
-                        .join("")}
+                      ${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
                      </div>`
                   : ``
               }
             </div>
           </div>
-
-          <!-- Fade overlay: makes the whole card run into monochrome black on the right -->
-          <div class="card__fade" aria-hidden="true"></div>
         </article>
       `;
     })
@@ -190,9 +187,7 @@ async function init() {
           <div class="card__row" style="grid-template-columns:1fr">
             <div class="card__content">
               <div class="card__kicker">Error</div>
-              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(
-                e?.message || e
-              )}</pre>
+              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(e?.message || e)}</pre>
             </div>
           </div>
         </div>
