@@ -6,6 +6,9 @@ const publishedEl = document.getElementById("published");
 // Netlify Functions (same-origin, relative paths)
 const AUTOFILL_URL = "/.netlify/functions/autofill";
 const ITEMS_URL = "/.netlify/functions/items";
+// Cloudflare Worker API base (dein Worker)
+const WORKER_BASE = "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
+const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
 
 // Helper: check if we are likely running with functions available.
 // Netlify production: https and hostname includes netlify.app or custom domain.
@@ -36,14 +39,15 @@ function buildItem() {
     .map((t) => t.trim())
     .filter(Boolean);
 
-  const item = {
-    type: getValue("type"),
-    title: getValue("title"),
-    href: getValue("href"),
-    image: getValue("image"),
-    summary: getValue("summary"),
-    tags,
-  };
+const item = {
+  type: getValue("type"),
+  title: getValue("title"),
+  href: getValue("href"),
+  image: getValue("image"),
+  imageUrl: getValue("imageUrl"),
+  summary: getValue("summary"),
+  tags,
+};
 
   if (item.type === "person") {
     const birthYear = getValue("birthYear");
@@ -84,6 +88,74 @@ function escapeHtml(s) {
 function setOutput(text) {
   output.textContent = String(text ?? "");
 }
+
+async function uploadImageToR2() {
+  const fileInput = document.getElementById("imageFile");
+  const urlInput = document.getElementById("imageUrl");
+
+  if (!fileInput) {
+    setOutput('Fehler: <input id="imageFile"> nicht gefunden.');
+    return;
+  }
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) {
+    setOutput("Bitte zuerst eine Bilddatei auswählen.");
+    return;
+  }
+
+  const token = prompt("Admin token (x-admin-token):");
+  if (!token) {
+    setOutput("Upload abgebrochen (kein Token).");
+    return;
+  }
+
+  const btn = document.getElementById("uploadImage");
+  if (btn) btn.disabled = true;
+
+  try {
+    setOutput(`Uploading…\nPOST ${UPLOAD_URL}`);
+
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+
+    const res = await fetch(UPLOAD_URL, {
+      method: "POST",
+      headers: { "x-admin-token": token },
+      body: fd,
+    });
+
+    const parsed = await safeReadJson(res);
+
+    if (!res.ok) {
+      if (btn) btn.disabled = false;
+      setOutput(
+        `Upload-Fehler (HTTP ${res.status}):\n` +
+          (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+      );
+      return;
+    }
+
+    const data = parsed.ok ? parsed.json : null;
+    if (!data || !data.imageUrl) {
+      if (btn) btn.disabled = false;
+      setOutput("Upload ok, aber keine imageUrl in der Antwort.");
+      return;
+    }
+
+    if (urlInput) urlInput.value = data.imageUrl;
+
+    // Optional: altes image-Feld leeren (wenn du nur noch URLs willst)
+    // const imageEl = document.getElementById("image");
+    // if (imageEl) imageEl.value = "";
+
+    setOutput("✔ Upload ok\n\n" + JSON.stringify(data, null, 2));
+  } catch (e) {
+    setOutput("Upload Fehler:\n" + (e?.message || e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 
 // -------------------------
 // AI AUTOFILL (preview only)
@@ -375,6 +447,16 @@ $("publish")?.addEventListener("click", () => {
     setOutput(`Publish Fehler: ${err?.message || err}`);
   });
 });
+
+$("uploadImage")?.addEventListener("click", () => {
+  uploadImageToR2().catch((err) => {
+    console.error(err);
+    setOutput(`Upload Fehler: ${err?.message || err}`);
+    const btn = $("uploadImage");
+    if (btn) btn.disabled = false;
+  });
+});
+
 
 $("refreshList")?.addEventListener("click", () => {
   loadPublished().catch(console.error);
