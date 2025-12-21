@@ -161,10 +161,9 @@ a:hover{opacity:.92}
   background:
     radial-gradient(600px 300px at 30% 30%, rgba(255,255,255,.18), rgba(0,0,0,0)),
     linear-gradient(120deg, rgba(255,255,255,.06), rgba(0,0,0,0)),
-    #000; /* ensures seamless blend into black */
+    #000; /* important: exact black base for seamless stitching */
 }
 
-/* full-height, monochrome */
 .card__img{
   width:100%;
   height:100%;
@@ -172,7 +171,8 @@ a:hover{opacity:.92}
   filter: grayscale(1) contrast(1.05) brightness(.92);
 }
 
-/* Fade ONLY over the image area (not over text) */
+/* Fade ONLY over the media (not over text).
+   Key fix for the "edge": reach full #000 earlier and keep it flat to 100%. */
 .card__media .card__fade{
   position:absolute;
   inset:0;
@@ -181,10 +181,11 @@ a:hover{opacity:.92}
   background: linear-gradient(
     90deg,
     rgba(0,0,0,0) 0%,
-    rgba(0,0,0,0.15) 35%,
-    rgba(0,0,0,0.45) 55%,
-    rgba(0,0,0,0.75) 70%,
-    rgba(0,0,0,1) 85%
+    rgba(0,0,0,0.12) 30%,
+    rgba(0,0,0,0.35) 48%,
+    rgba(0,0,0,0.75) 62%,
+    rgba(0,0,0,1) 72%,
+    rgba(0,0,0,1) 100%
   );
 }
 
@@ -193,10 +194,11 @@ a:hover{opacity:.92}
   background: linear-gradient(
     270deg,
     rgba(0,0,0,0) 0%,
-    rgba(0,0,0,0.15) 35%,
-    rgba(0,0,0,0.45) 55%,
-    rgba(0,0,0,0.75) 70%,
-    rgba(0,0,0,1) 85%
+    rgba(0,0,0,0.12) 30%,
+    rgba(0,0,0,0.35) 48%,
+    rgba(0,0,0,0.75) 62%,
+    rgba(0,0,0,1) 72%,
+    rgba(0,0,0,1) 100%
   );
 }
 
@@ -210,11 +212,16 @@ a:hover{opacity:.92}
   justify-content:flex-end;
   gap:10px;
 
-  /* keep content sinking into black, but without any overlay on text */
+  /* Deterministic black at the seam to avoid visible boundary */
   background:
-    radial-gradient(900px 420px at 30% 20%, rgba(255,255,255,.06), rgba(0,0,0,0)),
-    linear-gradient(to top, rgba(0,0,0,.95), rgba(0,0,0,.55), rgba(0,0,0,0));
+    linear-gradient(
+      to top,
+      #000 0%,
+      rgba(0,0,0,.85) 40%,
+      rgba(0,0,0,0) 100%
+    );
 }
+
 .card__kicker{
   font-size:12px;
   letter-spacing:.16em;
@@ -316,6 +323,7 @@ a:hover{opacity:.92}
       rgba(0,0,0,0) 0%,
       rgba(0,0,0,0.18) 32%,
       rgba(0,0,0,0.62) 62%,
+      rgba(0,0,0,1) 78%,
       rgba(0,0,0,1) 100%
     );
   }
