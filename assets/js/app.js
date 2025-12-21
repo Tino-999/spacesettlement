@@ -1,10 +1,11 @@
 // assets/js/app.js
-// Loads items from Cloudflare Worker API and renders cards.
+// Loads items from Cloudflare Worker /items (D1) and renders cards.
+// Provides search + type filter.
 
-const API_BASE =
+const WORKER_BASE =
   "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
 
-const ITEMS_URL = `${API_BASE}/items`;
+const ITEMS_URL = `${WORKER_BASE}/items`;
 
 const els = {
   q: document.getElementById("q"),
@@ -33,26 +34,93 @@ function normalizeText(s) {
     .replace(/\p{Diacritic}/gu, "");
 }
 
-function resolveImageUrl(item) {
-  const url = String(item?.imageUrl ?? "").trim();
-  return url || "";
+function isLikelyUrlOrPath(s) {
+  const v = String(s || "").trim();
+  if (!v) return false;
+  return v.includes("/") || v.startsWith("http://") || v.startsWith("https://");
+}
+
+function normalizeTags(tags) {
+  // D1 often stores tags as JSON string -> convert to array
+  if (Array.isArray(tags)) return tags.map(String).filter(Boolean);
+
+  if (typeof tags === "string") {
+    const t = tags.trim();
+    if (!t) return [];
+    // Try JSON parse first
+    try {
+      const parsed = JSON.parse(t);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {}
+    // Fallback: comma-separated
+    return t
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function normalizeItem(raw) {
+  const it = { ...(raw || {}) };
+
+  // Normalize tags
+  it.tags = normalizeTags(it.tags);
+
+  // Normalize imageUrl field (some rows may have null)
+  it.imageUrl = typeof it.imageUrl === "string" ? it.imageUrl.trim() : "";
+
+  // Normalize legacy image
+  it.image = typeof it.image === "string" ? it.image.trim() : "";
+
+  return it;
+}
+
+function resolveImagePath(item) {
+  // Prefer remote imageUrl (new model)
+  const imageUrl = String(item?.imageUrl ?? "").trim();
+  if (imageUrl) return imageUrl;
+
+  // Backward-compatible fallback: local "image" filename or already-full URL/path
+  const img = String(item?.image ?? "").trim();
+  if (!img) return "";
+
+  if (isLikelyUrlOrPath(img)) return img;
+
+  const type = String(item?.type ?? "").trim().toLowerCase();
+
+  const folderByType = {
+    person: "people",
+    project: "projects",
+    concept: "concepts",
+    org: "orgs",
+    topic: "topics",
+    book: "books",
+    movie: "movies",
+  };
+
+  const folder = folderByType[type];
+  return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
 }
 
 async function loadItems() {
   const res = await fetch(ITEMS_URL, { cache: "no-store" });
   const data = await res.json();
 
-  if (data && Array.isArray(data.items)) {
-    return data.items;
+  if (data && typeof data === "object" && Array.isArray(data.items)) {
+    return data.items.map(normalizeItem);
   }
+
   return [];
 }
 
 function setActiveChip(filter) {
   activeFilter = filter;
-  els.chips.forEach((b) =>
-    b.classList.toggle("is-active", b.dataset.filter === filter)
-  );
+  els.chips.forEach((b) => {
+    const isActive = b.dataset.filter === filter;
+    b.classList.toggle("is-active", isActive);
+  });
 }
 
 function passesFilter(item, q, filter) {
@@ -65,7 +133,7 @@ function passesFilter(item, q, filter) {
     item.title,
     item.summary,
     item.href,
-    ...(item.tags || []),
+    ...(Array.isArray(item.tags) ? item.tags : []),
     item.type,
   ]
     .map(normalizeText)
@@ -75,12 +143,15 @@ function passesFilter(item, q, filter) {
 }
 
 function formatPersonTitle(title, birthYear, deathYear) {
-  if (!birthYear && !deathYear) return title;
+  if (birthYear == null && deathYear == null) return title;
 
-  let years = birthYear ? String(birthYear) : "";
-  years += deathYear ? `-${deathYear}` : birthYear ? "-" : "";
+  let yearStr = "";
+  if (birthYear != null) yearStr = String(birthYear);
 
-  return `${title} (${years})`;
+  if (deathYear != null) yearStr += "-" + String(deathYear);
+  else if (birthYear != null) yearStr += "-";
+
+  return yearStr ? `${title} (${yearStr})` : title;
 }
 
 function render(items) {
@@ -89,10 +160,14 @@ function render(items) {
   if (!items.length) {
     els.cards.innerHTML = `
       <div class="card">
-        <div class="card__content">
-          <div class="card__kicker">No results</div>
+        <div class="card__row" style="grid-template-columns:1fr">
+          <div class="card__content">
+            <div class="card__kicker">No results</div>
+            <p class="page__lead">Nothing matched your filter/search.</p>
+          </div>
         </div>
-      </div>`;
+      </div>
+    `;
     return;
   }
 
@@ -101,14 +176,16 @@ function render(items) {
       let title = escapeHtml(item.title || "");
       const href = escapeHtml(item.href || "");
       const summary = escapeHtml(item.summary || "");
-      const tags = item.tags || [];
-      const imageUrl = escapeHtml(resolveImageUrl(item));
-      const type = escapeHtml(item.type || "");
+      const tags = Array.isArray(item.tags) ? item.tags : [];
+      const imagePath = escapeHtml(resolveImagePath(item));
+      const type = String(item.type || "").toLowerCase();
 
       if (type === "person") {
-        title = escapeHtml(
-          formatPersonTitle(item.title, item.birthYear, item.deathYear)
-        );
+        const birthYear =
+          item.birthYear != null ? parseInt(item.birthYear, 10) : null;
+        const deathYear =
+          item.deathYear != null ? parseInt(item.deathYear, 10) : null;
+        title = escapeHtml(formatPersonTitle(item.title || "", birthYear, deathYear));
       }
 
       const hasLink = href && href !== "kein Wiki";
@@ -118,21 +195,21 @@ function render(items) {
           <div class="card__row">
             <div class="card__media">
               ${
-                imageUrl
-                  ? `<img class="card__img" src="${imageUrl}" alt="${title}" loading="lazy">`
-                  : ""
+                imagePath
+                  ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">`
+                  : ``
               }
-              <div class="card__fade"></div>
+              <div class="card__fade" aria-hidden="true"></div>
             </div>
 
             <div class="card__content">
-              <div class="card__kicker">${type}</div>
+              <div class="card__kicker">${escapeHtml(type)}</div>
 
               <h2 class="card__title">
                 ${
                   hasLink
                     ? `<a href="${href}" target="_blank" rel="noopener">${title}</a>`
-                    : title
+                    : `${title}`
                 }
               </h2>
 
@@ -140,43 +217,71 @@ function render(items) {
 
               ${
                 tags.length
-                  ? `<div class="card__meta">
+                  ? `<div class="card__meta" aria-label="tags">
                       ${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
                      </div>`
-                  : ""
+                  : ``
               }
             </div>
           </div>
-        </article>`;
+        </article>
+      `;
     })
     .join("");
 }
 
 function applyAndRender() {
   const q = normalizeText(els.q?.value || "");
-  render(allItems.filter((it) => passesFilter(it, q, activeFilter)));
+  const filtered = allItems.filter((it) => passesFilter(it, q, activeFilter));
+  render(filtered);
 }
 
 async function init() {
   if (els.year) els.year.textContent = String(new Date().getFullYear());
 
-  allItems = await loadItems();
+  try {
+    allItems = await loadItems();
+  } catch (e) {
+    console.error(e);
+    if (els.cards) {
+      els.cards.innerHTML = `
+        <div class="card">
+          <div class="card__row" style="grid-template-columns:1fr">
+            <div class="card__content">
+              <div class="card__kicker">Error</div>
+              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(
+                e?.message || e
+              )}</pre>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    return;
+  }
 
+  // Sort: persons by birthYear (ascending), others by title
   allItems.sort((a, b) => {
     if (a.type === "person" && b.type === "person") {
-      return (a.birthYear || 9999) - (b.birthYear || 9999);
+      const aYear = a.birthYear != null ? parseInt(a.birthYear, 10) : null;
+      const bYear = b.birthYear != null ? parseInt(b.birthYear, 10) : null;
+
+      if (aYear != null && bYear != null) return aYear - bYear;
+      if (aYear != null) return -1;
+      if (bYear != null) return 1;
     }
-    return String(a.title).localeCompare(String(b.title));
+
+    return String(a.title || "").localeCompare(String(b.title || ""));
   });
 
-  els.chips.forEach((btn) =>
+  els.chips.forEach((btn) => {
     btn.addEventListener("click", () => {
-      setActiveChip(btn.dataset.filter);
+      setActiveChip(btn.dataset.filter || "all");
       applyAndRender();
-    })
-  );
+    });
+  });
 
-  els.q?.addEventListener("input", applyAndRender);
+  els.q?.addEventListener("input", () => applyAndRender());
 
   setActiveChip("all");
   applyAndRender();
