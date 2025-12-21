@@ -1,22 +1,28 @@
 // netlify/functions/items.js
-import { getStore } from "@netlify/blobs";
-import { randomUUID } from "node:crypto";
+const { getStore } = require("@netlify/blobs");
+const { randomUUID } = require("node:crypto");
 
 const HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, x-admin-token",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Max-Age": "86400", // 24 hours
 };
 
 function json(status, obj) {
-  return new Response(JSON.stringify(obj), {
-    status,
+  return {
+    statusCode: status,
     headers: { ...HEADERS, "Content-Type": "application/json; charset=utf-8" },
-  });
+    body: JSON.stringify(obj),
+  };
 }
 
 function text(status, body) {
-  return new Response(String(body ?? ""), { status, headers: HEADERS });
+  return {
+    statusCode: status,
+    headers: HEADERS,
+    body: String(body ?? ""),
+  };
 }
 
 function isNonEmptyString(v) {
@@ -28,22 +34,29 @@ function normalizeTags(tags) {
   return tags.map((t) => String(t).trim()).filter(Boolean);
 }
 
-function authOk(req) {
+function authOk(event) {
   const required = process.env.ADMIN_TOKEN;
   if (!required) return true; // open if not set
-  const token = req.headers.get("x-admin-token");
+  const token = event.headers["x-admin-token"] || event.headers["X-Admin-Token"];
   return token === required;
 }
 
-export default async (req) => {
-  if (req.method === "OPTIONS") return new Response("", { status: 204, headers: HEADERS });
+exports.handler = async (event) => {
+  // Handle CORS preflight
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: HEADERS,
+      body: "",
+    };
+  }
 
   const store = getStore({ name: "kb-items" });
 
-  // ----------------
+  // ---------------- 
   // GET: list items
   // ----------------
-  if (req.method === "GET") {
+  if (event.httpMethod === "GET") {
     try {
       const listed = await store.list({ prefix: "items/" });
       const blobs = listed?.blobs || [];
@@ -75,12 +88,12 @@ export default async (req) => {
   // ----------------
   // POST: publish/save
   // ----------------
-  if (req.method === "POST") {
-    if (!authOk(req)) return text(401, "Unauthorized");
+  if (event.httpMethod === "POST") {
+    if (!authOk(event)) return text(401, "Unauthorized");
 
     let item;
     try {
-      item = await req.json();
+      item = JSON.parse(event.body || "{}");
     } catch {
       return text(400, "Invalid JSON");
     }
@@ -112,12 +125,12 @@ export default async (req) => {
   // ----------------
   // DELETE: delete by key (preferred) or by id
   // ----------------
-  if (req.method === "DELETE") {
-    if (!authOk(req)) return text(401, "Unauthorized");
+  if (event.httpMethod === "DELETE") {
+    if (!authOk(event)) return text(401, "Unauthorized");
 
-    const url = new URL(req.url);
-    const key = url.searchParams.get("key");
-    const id = url.searchParams.get("id");
+    const params = event.queryStringParameters || {};
+    const key = params.key;
+    const id = params.id;
 
     if (isNonEmptyString(key)) {
       await store.delete(key);

@@ -122,11 +122,6 @@ async function autofillFromAI() {
     return;
   }
 
-  // Debug: Log the response to see what we got
-  console.log("Autofill response:", data);
-  console.log("birthYear:", data.birthYear, "type:", typeof data.birthYear);
-  console.log("deathYear:", data.deathYear, "type:", typeof data.deathYear);
-
   setValue("href", data.href);
   setValue("image", data.image);
   setValue("summary", data.summary);
@@ -138,20 +133,16 @@ async function autofillFromAI() {
     // Always try to set birthYear and deathYear for persons
     if (data.birthYear != null && typeof data.birthYear === "number") {
       setValue("birthYear", String(data.birthYear));
-      console.log("Set birthYear to:", data.birthYear);
     } else {
       // Clear if not provided
       setValue("birthYear", "");
-      console.log("birthYear not provided or invalid");
     }
     
     if (data.deathYear != null && typeof data.deathYear === "number") {
       setValue("deathYear", String(data.deathYear));
-      console.log("Set deathYear to:", data.deathYear);
     } else {
       // Person is still alive (deathYear is null) or unknown (deathYear is undefined) - clear the field
       setValue("deathYear", "");
-      console.log("deathYear is", data.deathYear === null ? "null (person alive)" : "not provided");
     }
   } else {
     // Clear fields if not a person

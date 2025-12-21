@@ -187,11 +187,6 @@ exports.handler = async (event) => {
     required: [...baseRequired, ...personRequired],
   };
 
-  // Debug log for schema
-  if (type === "person") {
-    console.log("[autofill] Schema for person - required fields:", schema.required);
-  }
-
   const instructions =
     "You help fill entries for a space-settlement index.\n" +
     "Be factual and neutral.\n" +
@@ -256,14 +251,6 @@ exports.handler = async (event) => {
     const extracted = extractStructuredJson(data);
     if (!extracted) {
       return text(500, `Could not extract structured JSON from OpenAI response.\nRAW:\n${raw}`);
-    }
-
-    // Debug: Log what the AI returned (for persons)
-    if (type === "person") {
-      console.log("[autofill] Person detected, extracted:", JSON.stringify(extracted, null, 2));
-      console.log("[autofill] birthYear:", extracted.birthYear, "type:", typeof extracted.birthYear);
-      console.log("[autofill] deathYear:", extracted.deathYear, "type:", typeof extracted.deathYear);
-      console.log("[autofill] Schema required fields:", schema.required);
     }
 
     const wikiUrl = await wikiPromise;
