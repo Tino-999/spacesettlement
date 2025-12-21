@@ -8,9 +8,7 @@ const IS_NETLIFY = location.hostname.endsWith("netlify.app");
 
 // On Netlify, same-origin functions work. Else (GitHub Pages), fallback to static JSON.
 // Note: You *can* call Netlify cross-origin, but for now we keep GH Pages as a static demo.
-const ITEMS_URL = IS_NETLIFY
-  ? "/.netlify/functions/items"
-  : "data/items.json";
+const ITEMS_URL = IS_NETLIFY ? "/.netlify/functions/items" : "data/items.json";
 
 const els = {
   q: document.getElementById("q"),
@@ -93,7 +91,9 @@ function passesFilter(item, q, filter) {
     item.href,
     ...(Array.isArray(item.tags) ? item.tags : []),
     item.type,
-  ].map(normalizeText).join(" ");
+  ]
+    .map(normalizeText)
+    .join(" ");
 
   return hay.includes(q);
 }
@@ -102,52 +102,73 @@ function render(items) {
   if (!els.cards) return;
 
   if (!items.length) {
-    els.cards.innerHTML = `<div class="card"><div class="card__row" style="grid-template-columns:1fr"><div class="card__content"><div class="card__kicker">No results</div><p class="page__lead">Nothing matched your filter/search.</p></div></div></div>`;
+    els.cards.innerHTML = `
+      <div class="card">
+        <div class="card__row" style="grid-template-columns:1fr">
+          <div class="card__content">
+            <div class="card__kicker">No results</div>
+            <p class="page__lead">Nothing matched your filter/search.</p>
+          </div>
+        </div>
+      </div>
+    `;
     return;
   }
 
-  els.cards.innerHTML = items.map((item) => {
-    const title = escapeHtml(item.title || "");
-    const href = escapeHtml(item.href || "");
-    const summary = escapeHtml(item.summary || "");
-    const tags = Array.isArray(item.tags) ? item.tags : [];
-    const imagePath = escapeHtml(resolveImagePath(item));
-    const type = escapeHtml(item.type || "");
+  els.cards.innerHTML = items
+    .map((item) => {
+      const title = escapeHtml(item.title || "");
+      const href = escapeHtml(item.href || "");
+      const summary = escapeHtml(item.summary || "");
+      const tags = Array.isArray(item.tags) ? item.tags : [];
+      const imagePath = escapeHtml(resolveImagePath(item));
+      const type = escapeHtml(item.type || "");
 
-    // If href is "kein Wiki" (from your autofill rules), don't make it a link.
-    const hasLink = href && href !== "kein Wiki";
+      // If href is "kein Wiki" (from your autofill rules), don't make it a link.
+      const hasLink = href && href !== "kein Wiki";
 
-    return `
-      <article class="card">
-        <div class="card__row" style="grid-template-columns:160px 1fr">
-          <div class="card__media" style="display:flex; align-items:center; justify-content:center;">
-            ${imagePath
-              ? `<img src="${imagePath}" alt="${title}" style="width:140px; height:140px; object-fit:cover; border-radius:16px; opacity:0.9;" loading="lazy">`
-              : `<div style="width:140px; height:140px; border-radius:16px; background:rgba(255,255,255,0.06);"></div>`
-            }
-          </div>
-          <div class="card__content">
-            <div class="card__kicker">${type}</div>
-            <h2 style="margin:0 0 6px 0; font-size:22px; letter-spacing:0.02em;">
+      return `
+        <article class="card">
+          <div class="card__row">
+            <div class="card__media">
               ${
-                hasLink
-                  ? `<a href="${href}" target="_blank" rel="noopener" class="nav__link" style="padding:0; border:none;">${title}</a>`
-                  : `${title}`
+                imagePath
+                  ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">`
+                  : ``
               }
-            </h2>
-            ${summary ? `<p class="page__lead" style="margin:0 0 10px 0; font-size:14px;">${summary}</p>` : ""}
-            ${
-              tags.length
-                ? `<div class="chips" role="list" aria-label="tags">
-                    ${tags.map((t) => `<span class="chip" role="listitem" style="cursor:default;">${escapeHtml(t)}</span>`).join("")}
-                   </div>`
-                : ``
-            }
+            </div>
+
+            <div class="card__content">
+              <div class="card__kicker">${type}</div>
+
+              <h2 class="card__title">
+                ${
+                  hasLink
+                    ? `<a href="${href}" target="_blank" rel="noopener">${title}</a>`
+                    : `${title}`
+                }
+              </h2>
+
+              ${summary ? `<p class="card__summary">${summary}</p>` : ""}
+
+              ${
+                tags.length
+                  ? `<div class="card__meta" aria-label="tags">
+                      ${tags
+                        .map((t) => `<span class="tag">${escapeHtml(t)}</span>`)
+                        .join("")}
+                     </div>`
+                  : ``
+              }
+            </div>
           </div>
-        </div>
-      </article>
-    `;
-  }).join("");
+
+          <!-- Fade overlay: makes the whole card run into monochrome black on the right -->
+          <div class="card__fade" aria-hidden="true"></div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function applyAndRender() {
@@ -164,7 +185,18 @@ async function init() {
   } catch (e) {
     console.error(e);
     if (els.cards) {
-      els.cards.innerHTML = `<div class="card"><div class="card__row" style="grid-template-columns:1fr"><div class="card__content"><div class="card__kicker">Error</div><pre class="code" style="white-space:pre-wrap;">${escapeHtml(e?.message || e)}</pre></div></div></div>`;
+      els.cards.innerHTML = `
+        <div class="card">
+          <div class="card__row" style="grid-template-columns:1fr">
+            <div class="card__content">
+              <div class="card__kicker">Error</div>
+              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(
+                e?.message || e
+              )}</pre>
+            </div>
+          </div>
+        </div>
+      `;
     }
     return;
   }
