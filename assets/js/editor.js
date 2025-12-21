@@ -3,25 +3,23 @@
 const output = document.getElementById("output");
 const publishedEl = document.getElementById("published");
 
-// Netlify Function endpoint (POST/GET/DELETE)
-const NETLIFY_ORIGIN = "https://inquisitive-sunshine-0cfe6a.netlify.app";
+// Netlify Functions (same-origin, relative paths)
+const AUTOFILL_URL = "/.netlify/functions/autofill";
+const ITEMS_URL = "/.netlify/functions/items";
 
-const IS_NETLIFY = location.hostname.endsWith("netlify.app");
-
-const AUTOFILL_URL = IS_NETLIFY
-  ? "/.netlify/functions/autofill"
-  : `${NETLIFY_ORIGIN}/.netlify/functions/autofill`;
-
-const ITEMS_URL = IS_NETLIFY
-  ? "/.netlify/functions/items"
-  : `${NETLIFY_ORIGIN}/.netlify/functions/items`;
+// Helper: check if we are likely running with functions available.
+// Netlify production: https and hostname includes netlify.app or custom domain.
+// Netlify Dev: usually http://localhost:8888 with /.netlify/functions proxied.
+// Plain static server: functions are NOT available.
+const IS_LOCALHOST =
+  location.hostname === "localhost" || location.hostname === "127.0.0.1";
 
 function $(id) {
   return document.getElementById(id);
 }
 
 function getValue(id) {
-  return $(id).value.trim();
+  return ($(id)?.value ?? "").trim();
 }
 
 function setValue(id, value) {
@@ -47,10 +45,10 @@ function buildItem() {
     tags,
   };
 
-  // Add birthYear and deathYear for persons
   if (item.type === "person") {
     const birthYear = getValue("birthYear");
     const deathYear = getValue("deathYear");
+
     if (birthYear) {
       const year = parseInt(birthYear, 10);
       if (!isNaN(year)) item.birthYear = year;
@@ -73,6 +71,20 @@ async function safeReadJson(res) {
   }
 }
 
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  }[m]));
+}
+
+function setOutput(text) {
+  output.textContent = String(text ?? "");
+}
+
 // -------------------------
 // AI AUTOFILL (preview only)
 // -------------------------
@@ -81,14 +93,14 @@ async function autofillFromAI() {
   const type = getValue("type");
 
   if (!title) {
-    output.textContent = "Bitte zuerst einen Title eingeben.";
+    setOutput("Bitte zuerst einen Title eingeben.");
     return;
   }
 
   const btn = $("autofill");
   if (btn) btn.disabled = true;
 
-  output.textContent = `Auto-Fill läuft…\nPOST ${AUTOFILL_URL}`;
+  setOutput(`Auto-Fill läuft…\nPOST ${AUTOFILL_URL}`);
 
   const current = buildItem();
 
@@ -101,7 +113,7 @@ async function autofillFromAI() {
     });
   } catch (e) {
     if (btn) btn.disabled = false;
-    output.textContent = "Netzwerkfehler:\n" + (e?.message || e);
+    setOutput("Netzwerkfehler (autofill):\n" + (e?.message || e));
     return;
   }
 
@@ -109,16 +121,17 @@ async function autofillFromAI() {
 
   if (!res.ok) {
     if (btn) btn.disabled = false;
-    output.textContent =
+    setOutput(
       `Autofill-Fehler (HTTP ${res.status}):\n` +
-      (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw);
+        (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+    );
     return;
   }
 
   const data = parsed.ok && parsed.json ? parsed.json : null;
   if (!data) {
     if (btn) btn.disabled = false;
-    output.textContent = "Ungültige Autofill-Antwort.";
+    setOutput("Ungültige Autofill-Antwort.");
     return;
   }
 
@@ -127,30 +140,25 @@ async function autofillFromAI() {
   setValue("summary", data.summary);
   setValue("tags", data.tags);
 
-  // Set birthYear and deathYear if present (for persons)
   const currentType = getValue("type");
   if (currentType === "person") {
-    // Always try to set birthYear and deathYear for persons
     if (data.birthYear != null && typeof data.birthYear === "number") {
       setValue("birthYear", String(data.birthYear));
     } else {
-      // Clear if not provided
       setValue("birthYear", "");
     }
-    
+
     if (data.deathYear != null && typeof data.deathYear === "number") {
       setValue("deathYear", String(data.deathYear));
     } else {
-      // Person is still alive (deathYear is null) or unknown (deathYear is undefined) - clear the field
       setValue("deathYear", "");
     }
   } else {
-    // Clear fields if not a person
     setValue("birthYear", "");
     setValue("deathYear", "");
   }
 
-  output.textContent = JSON.stringify(buildItem(), null, 2);
+  setOutput(JSON.stringify(buildItem(), null, 2));
 
   if (btn) btn.disabled = false;
 }
@@ -159,63 +167,103 @@ async function autofillFromAI() {
 // PUBLISH
 // -------------------------
 async function publishItem() {
+  // Hinweis für lokalen Static-Server ohne Functions
+  if (IS_LOCALHOST) {
+    setOutput(
+      "Publish deaktiviert auf localhost ohne Netlify Functions.\n" +
+      "Starte über Netlify Dev oder teste Publish auf der Netlify-URL.\n" +
+      `Ziel wäre: POST ${ITEMS_URL}`
+    );
+    return;
+  }
+
   const item = buildItem();
+  setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
 
-  output.textContent = "Publishing…";
-
-  const res = await fetch(ITEMS_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // Optional: protect later
-      // "x-admin-token": window.ADMIN_TOKEN || ""
-    },
-    body: JSON.stringify(item),
-  });
+  let res;
+  try {
+    res = await fetch(ITEMS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(item),
+    });
+  } catch (e) {
+    setOutput(
+      "Publish Fehler: Failed to fetch\n\n" +
+      "Ursachen:\n" +
+      "- Function nicht deployed oder falscher Function-Name.\n" +
+      "- Netzwerk/Adblocker blockiert /.netlify/functions.\n\n" +
+      `Request: POST ${ITEMS_URL}\n` +
+      `Browser-Fehler: ${e?.message || e}`
+    );
+    return;
+  }
 
   const parsed = await safeReadJson(res);
 
   if (!res.ok) {
-    output.textContent =
+    setOutput(
       `Publish-Fehler (HTTP ${res.status}):\n` +
-      (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw);
+        (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+    );
     return;
   }
 
-  output.textContent = "✔ Published\n\n" + JSON.stringify(parsed.json, null, 2);
+  setOutput("✔ Published\n\n" + JSON.stringify(parsed.json, null, 2));
   alert("Item veröffentlicht ✔");
 
-  // refresh list after publish
   await loadPublished();
 }
 
 // -------------------------
 // LIST + DELETE
 // -------------------------
-function escapeHtml(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  }[m]));
-}
-
 async function loadPublished() {
   if (!publishedEl) return;
 
-  publishedEl.textContent = "Loading…";
-
-  const res = await fetch(ITEMS_URL, { cache: "no-store" });
-  const parsed = await safeReadJson(res);
-
-  if (!res.ok) {
-    publishedEl.innerHTML = `<pre class="code" style="white-space:pre-wrap;">${escapeHtml(parsed.raw)}</pre>`;
+  // Lokal ohne Functions: nur Hinweis.
+  if (IS_LOCALHOST) {
+    publishedEl.textContent =
+      "Published items nicht verfügbar auf localhost ohne Netlify Functions.";
     return;
   }
 
-  const items = parsed.ok && parsed.json && Array.isArray(parsed.json.items) ? parsed.json.items : [];
+  publishedEl.textContent = `Loading…\nGET ${ITEMS_URL}`;
+
+  let res;
+  try {
+    res = await fetch(ITEMS_URL, { cache: "no-store" });
+  } catch (e) {
+    publishedEl.innerHTML =
+      `<pre class="code" style="white-space:pre-wrap;">` +
+      escapeHtml(
+        "Netzwerkfehler (list): Failed to fetch\n" +
+        `GET ${ITEMS_URL}\n` +
+        (e?.message || e)
+      ) +
+      `</pre>`;
+    return;
+  }
+
+  const parsed = await safeReadJson(res);
+
+  if (!res.ok) {
+    publishedEl.innerHTML =
+      `<pre class="code" style="white-space:pre-wrap;">` +
+      escapeHtml(
+        `List-Fehler (HTTP ${res.status}):\n` +
+          (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+      ) +
+      `</pre>`;
+    return;
+  }
+
+  const items =
+    parsed.ok && parsed.json && Array.isArray(parsed.json.items)
+      ? parsed.json.items
+      : [];
 
   if (!items.length) {
     publishedEl.textContent = "No published items yet.";
@@ -224,26 +272,30 @@ async function loadPublished() {
 
   publishedEl.innerHTML = `
     <div style="display:flex; flex-direction:column; gap:10px;">
-      ${items.map((it) => {
-        const title = escapeHtml(it.title || "");
-        const type = escapeHtml(it.type || "");
-        const createdAt = escapeHtml(it.createdAt || "");
-        const key = escapeHtml(it._key || "");
-        const id = escapeHtml(it.id || "");
-        return `
-          <div style="display:flex; align-items:center; gap:10px; justify-content:space-between; border:1px solid rgba(255,255,255,0.08); padding:10px; border-radius:14px;">
-            <div style="min-width:0;">
-              <div style="opacity:0.7; font-size:12px;">${type} · ${createdAt}</div>
-              <div style="font-weight:700; letter-spacing:0.04em;">${title}</div>
-              <div style="opacity:0.6; font-size:12px; word-break:break-all;">${id}</div>
+      ${items
+        .map((it) => {
+          const title = escapeHtml(it.title || "");
+          const type = escapeHtml(it.type || "");
+          const createdAt = escapeHtml(it.createdAt || "");
+          const key = escapeHtml(it._key || "");
+          const id = escapeHtml(it.id || "");
+          return `
+            <div style="display:flex; align-items:center; gap:10px; justify-content:space-between; border:1px solid rgba(255,255,255,0.08); padding:10px; border-radius:14px;">
+              <div style="min-width:0;">
+                <div style="opacity:0.7; font-size:12px;">${type} · ${createdAt}</div>
+                <div style="font-weight:700; letter-spacing:0.04em;">${title}</div>
+                <div style="opacity:0.6; font-size:12px; word-break:break-all;">${id}</div>
+              </div>
+              <div style="display:flex; gap:8px; flex-shrink:0;">
+                <button class="btn btn--ghost" data-load='${escapeHtml(
+                  JSON.stringify(it)
+                ).replace(/'/g, "&#039;")}'>Load</button>
+                <button class="btn" data-del-key="${key}">Delete</button>
+              </div>
             </div>
-            <div style="display:flex; gap:8px; flex-shrink:0;">
-              <button class="btn btn--ghost" data-load='${escapeHtml(JSON.stringify(it)).replace(/'/g, "&#039;")}'>Load</button>
-              <button class="btn" data-del-key="${key}">Delete</button>
-            </div>
-          </div>
-        `;
-      }).join("")}
+          `;
+        })
+        .join("")}
     </div>
   `;
 
@@ -258,7 +310,7 @@ async function loadPublished() {
         setValue("image", it.image);
         setValue("summary", it.summary);
         setValue("tags", Array.isArray(it.tags) ? it.tags : []);
-        // Load birthYear and deathYear for persons
+
         if (it.type === "person") {
           setValue("birthYear", it.birthYear != null ? String(it.birthYear) : "");
           setValue("deathYear", it.deathYear != null ? String(it.deathYear) : "");
@@ -266,7 +318,8 @@ async function loadPublished() {
           setValue("birthYear", "");
           setValue("deathYear", "");
         }
-        output.textContent = JSON.stringify(buildItem(), null, 2);
+
+        setOutput(JSON.stringify(buildItem(), null, 2));
       } catch (e) {
         console.error(e);
       }
@@ -280,13 +333,15 @@ async function loadPublished() {
       if (!key) return;
       if (!confirm("Delete this item?")) return;
 
-      const delRes = await fetch(`${ITEMS_URL}?key=${encodeURIComponent(key)}`, {
-        method: "DELETE",
-        headers: {
-          // Optional: protect later
-          // "x-admin-token": window.ADMIN_TOKEN || ""
-        },
-      });
+      let delRes;
+      try {
+        delRes = await fetch(`${ITEMS_URL}?key=${encodeURIComponent(key)}`, {
+          method: "DELETE",
+        });
+      } catch (e) {
+        alert("Delete failed: Failed to fetch\n" + (e?.message || e));
+        return;
+      }
 
       if (!delRes.ok) {
         const t = await delRes.text();
@@ -302,22 +357,22 @@ async function loadPublished() {
 // -------------------------
 // UI wiring
 // -------------------------
-$("generate").addEventListener("click", () => {
-  output.textContent = JSON.stringify(buildItem(), null, 2);
+$("generate")?.addEventListener("click", () => {
+  setOutput(JSON.stringify(buildItem(), null, 2));
 });
 
-$("autofill").addEventListener("click", () => {
+$("autofill")?.addEventListener("click", () => {
   autofillFromAI().catch((err) => {
     console.error(err);
-    output.textContent = `Auto-Fill Fehler: ${err?.message || err}`;
+    setOutput(`Auto-Fill Fehler: ${err?.message || err}`);
     $("autofill").disabled = false;
   });
 });
 
-$("publish").addEventListener("click", () => {
+$("publish")?.addEventListener("click", () => {
   publishItem().catch((err) => {
     console.error(err);
-    output.textContent = `Publish Fehler: ${err?.message || err}`;
+    setOutput(`Publish Fehler: ${err?.message || err}`);
   });
 });
 

@@ -1,12 +1,16 @@
 // netlify/functions/items.js
+
 const { getStore } = require("@netlify/blobs");
 const { randomUUID } = require("node:crypto");
 
+/**
+ * CORS + JSON helpers
+ */
 const HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, x-admin-token",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-  "Access-Control-Max-Age": "86400", // 24 hours
+  "Access-Control-Max-Age": "86400",
 };
 
 function json(status, obj) {
@@ -25,6 +29,9 @@ function text(status, body) {
   };
 }
 
+/**
+ * Small helpers
+ */
 function isNonEmptyString(v) {
   return typeof v === "string" && v.trim().length > 0;
 }
@@ -34,50 +41,69 @@ function normalizeTags(tags) {
   return tags.map((t) => String(t).trim()).filter(Boolean);
 }
 
+/**
+ * Optional admin auth (disabled if ADMIN_TOKEN not set)
+ */
 function authOk(event) {
   const required = process.env.ADMIN_TOKEN;
-  if (!required) return true; // open if not set
-  const token = event.headers["x-admin-token"] || event.headers["X-Admin-Token"];
+  if (!required) return true;
+  const token =
+    event.headers["x-admin-token"] || event.headers["X-Admin-Token"];
   return token === required;
 }
 
+/**
+ * MAIN HANDLER
+ */
 exports.handler = async (event) => {
-  // Handle CORS preflight
+  // --- CORS preflight ---
   if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 204,
-      headers: HEADERS,
-      body: "",
-    };
+    return { statusCode: 204, headers: HEADERS, body: "" };
   }
 
-  const store = getStore({ name: "kb-items" });
+  // --- HARD GUARD: Blobs env must exist ---
+  if (!process.env.BLOBS_SITE_ID || !process.env.BLOBS_TOKEN) {
+    return json(500, {
+      ok: false,
+      error: "Missing BLOBS_SITE_ID or BLOBS_TOKEN",
+      hasSiteId: !!process.env.BLOBS_SITE_ID,
+      hasToken: !!process.env.BLOBS_TOKEN,
+    });
+  }
 
-  // ---------------- 
-  // GET: list items
-  // ----------------
+  // --- Create Blobs store (MANUAL CONFIG) ---
+  const store = getStore({
+    name: "kb-items",
+    siteID: process.env.BLOBS_SITE_ID,
+    token: process.env.BLOBS_TOKEN,
+  });
+
+  /**
+   * GET — list items
+   */
   if (event.httpMethod === "GET") {
     try {
       const listed = await store.list({ prefix: "items/" });
       const blobs = listed?.blobs || [];
 
-      const items = (await Promise.all(
-        blobs.map(async (b) => {
-          const key = b.key;
-          const raw = await store.get(key);
-          if (!raw) return null;
-          try {
-            const obj = JSON.parse(raw);
-            // include internal key so admin can delete safely
-            return { ...obj, _key: key };
-          } catch {
-            return null;
-          }
-        })
-      )).filter(Boolean);
+      const items = (
+        await Promise.all(
+          blobs.map(async (b) => {
+            const raw = await store.get(b.key);
+            if (!raw) return null;
+            try {
+              const obj = JSON.parse(raw);
+              return { ...obj, _key: b.key };
+            } catch {
+              return null;
+            }
+          })
+        )
+      ).filter(Boolean);
 
-      // newest first (if createdAt exists)
-      items.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      items.sort((a, b) =>
+        String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+      );
 
       return json(200, { ok: true, items });
     } catch (e) {
@@ -85,9 +111,9 @@ exports.handler = async (event) => {
     }
   }
 
-  // ----------------
-  // POST: publish/save
-  // ----------------
+  /**
+   * POST — publish item
+   */
   if (event.httpMethod === "POST") {
     if (!authOk(event)) return text(401, "Unauthorized");
 
@@ -122,9 +148,9 @@ exports.handler = async (event) => {
     return json(200, { ok: true, id });
   }
 
-  // ----------------
-  // DELETE: delete by key (preferred) or by id
-  // ----------------
+  /**
+   * DELETE — by key or id
+   */
   if (event.httpMethod === "DELETE") {
     if (!authOk(event)) return text(401, "Unauthorized");
 
