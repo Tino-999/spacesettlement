@@ -1,13 +1,11 @@
 // netlify/functions/autofill.js
 // Netlify Function: CORS + OpenAI Responses API (Structured Outputs / JSON Schema)
-// Returns JSON: { type, title, href, image, summary, tags }
+// Returns JSON: { type, title, href, image, summary, tags, birthYear?, deathYear? }
 //
-// Changes requested:
-// - href should be the Wikipedia page if it exists; otherwise "kein Wiki" (German string, as requested).
-//   Implementation: lookup via Wikipedia REST API server-side (factual; avoids LLM guessing).
-// - summary must always be short English text answering:
-//   "Why is the person recognized among scientists and what is their contribution to space settlement?"
-//   If unknown from context, say so explicitly (do not invent facts).
+// Changes:
+// - href comes from Wikipedia REST summary endpoint if exists; else "kein Wiki".
+// - birthYear/deathYear for persons are fetched from Wikidata via Wikipedia -> QID mapping.
+// - Model is instructed NOT to invent facts and NOT to "look up" years.
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -32,8 +30,6 @@ function text(statusCode, body) {
 }
 
 function toImagePlaceholder(title) {
-  // "Elon Musk" -> "elon_musk.jpg"
-  // "Gerard K. O'Neill" -> "gerard_k_oneill.jpg"
   const slug = String(title || "")
     .trim()
     .toLowerCase()
@@ -44,11 +40,9 @@ function toImagePlaceholder(title) {
 }
 
 // Extract JSON from Responses API result (Structured Outputs).
-// Handles both "output_json" and "output_text" (JSON-as-string) variants.
 function extractStructuredJson(data) {
   const outputs = Array.isArray(data?.output) ? data.output : [];
 
-  // 1) Preferred: "output_json"
   for (const out of outputs) {
     const content = Array.isArray(out?.content) ? out.content : [];
     for (const c of content) {
@@ -57,7 +51,6 @@ function extractStructuredJson(data) {
     }
   }
 
-  // 2) Common: JSON in content[].text
   for (const out of outputs) {
     const content = Array.isArray(out?.content) ? out.content : [];
     for (const c of content) {
@@ -73,7 +66,6 @@ function extractStructuredJson(data) {
     }
   }
 
-  // 3) Fallback: data.output_text convenience field
   if (typeof data?.output_text === "string") {
     const s = data.output_text.trim();
     if (s) {
@@ -88,8 +80,7 @@ function extractStructuredJson(data) {
   return null;
 }
 
-// Wikipedia lookup via REST summary endpoint.
-// Returns a canonical page URL if found, else null.
+// Wikipedia lookup via REST summary endpoint -> canonical page URL or null.
 async function wikipediaUrlForTitle(title) {
   const t = String(title || "").trim();
   if (!t) return null;
@@ -101,18 +92,14 @@ async function wikipediaUrlForTitle(title) {
     const res = await fetch(url, {
       method: "GET",
       headers: {
-        // polite UA; Wikipedia may throttle generic/no UA requests
         "User-Agent": "spacesettlement-index/1.0 (Netlify Function)",
-        "Accept": "application/json",
+        Accept: "application/json",
       },
     });
 
     if (!res.ok) return null;
 
     const data = await res.json();
-
-    // Disambiguation pages are still pages, but often not what we want.
-    // If it's disambiguation, treat as "not found" to avoid wrong href.
     if (data?.type === "disambiguation") return null;
 
     const pageUrl = data?.content_urls?.desktop?.page;
@@ -122,8 +109,97 @@ async function wikipediaUrlForTitle(title) {
   }
 }
 
+/**
+ * Wikipedia -> Wikidata QID via MediaWiki API.
+ * Returns e.g. "Q317521" or null.
+ */
+async function wikipediaQidForTitle(title) {
+  const t = String(title || "").trim();
+  if (!t) return null;
+
+  // MediaWiki API expects spaces, not underscores, but either usually works.
+  const url =
+    "https://en.wikipedia.org/w/api.php" +
+    `?action=query&format=json&prop=pageprops&ppprop=wikibase_item&redirects=1&titles=${encodeURIComponent(t)}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent": "spacesettlement-index/1.0 (Netlify Function)",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const pages = data?.query?.pages;
+    if (!pages || typeof pages !== "object") return null;
+
+    const firstKey = Object.keys(pages)[0];
+    const page = pages[firstKey];
+    const qid = page?.pageprops?.wikibase_item;
+
+    return typeof qid === "string" && /^Q\d+$/.test(qid) ? qid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse Wikidata "time" string like "+1971-06-28T00:00:00Z" -> 1971
+ */
+function yearFromWikidataTime(t) {
+  if (typeof t !== "string") return null;
+  // Match leading sign + year
+  const m = t.match(/^([+-])(\d{1,})-/);
+  if (!m) return null;
+  const year = parseInt(m[2], 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+/**
+ * Fetch birth/death years from Wikidata claims.
+ * P569 = date of birth, P570 = date of death.
+ * Returns { birthYear: number|null, deathYear: number|null } or null on failure.
+ */
+async function wikidataYearsForQid(qid) {
+  if (!qid) return null;
+
+  const url = `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(qid)}.json`;
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent": "spacesettlement-index/1.0 (Netlify Function)",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const entity = data?.entities?.[qid];
+    if (!entity) return null;
+
+    const claims = entity.claims || {};
+
+    const birth = claims.P569?.[0]?.mainsnak?.datavalue?.value?.time;
+    const death = claims.P570?.[0]?.mainsnak?.datavalue?.value?.time;
+
+    const birthYear = yearFromWikidataTime(birth);
+    const deathYear = yearFromWikidataTime(death);
+
+    return {
+      birthYear: birthYear ?? null,
+      deathYear: deathYear ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 exports.handler = async (event) => {
-  // CORS preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: CORS_HEADERS, body: "" };
   }
@@ -149,25 +225,21 @@ exports.handler = async (event) => {
 
   if (!title) return text(400, "Missing title");
 
-  // We will fill href server-side (Wikipedia lookup), so model does NOT need to provide it.
-  // Still keep href in schema because the function returns it.
   const tagPattern = "^[a-z0-9][a-z0-9_-]*$";
   const imagePattern = "^[a-z0-9][a-z0-9_]*\\.jpg$";
 
-  // Build schema dynamically - for persons, birthYear and deathYear are required
+  // NOTE: For persons we do NOT require the model to provide years.
+  // Years are pulled factually from Wikidata and then enforced below.
   const baseRequired = ["type", "title", "href", "image", "summary", "tags"];
-  const personRequired = type === "person" ? ["birthYear", "deathYear"] : [];
-  
+
   const schema = {
     type: "object",
     additionalProperties: false,
     properties: {
       type: { type: "string", minLength: 1 },
       title: { type: "string", minLength: 1 },
-      // We'll accept anything here, but will overwrite with Wikipedia URL or "kein Wiki"
       href: { type: "string", minLength: 1 },
       image: { type: "string", pattern: imagePattern },
-      // Short and always present (we'll enforce a fallback if needed)
       summary: { type: "string", minLength: 20, maxLength: 280 },
       tags: {
         type: "array",
@@ -175,16 +247,13 @@ exports.handler = async (event) => {
         maxItems: 6,
         items: { type: "string", minLength: 2, maxLength: 24, pattern: tagPattern },
       },
-      // For persons: birth and death years
+      // Optional in schema; server will add for persons if available.
       birthYear: { type: "integer", minimum: 0, maximum: 2100 },
-      deathYear: { 
-        anyOf: [
-          { type: "integer", minimum: 0, maximum: 2100 },
-          { type: "null" }
-        ]
+      deathYear: {
+        anyOf: [{ type: "integer", minimum: 0, maximum: 2100 }, { type: "null" }],
       },
     },
-    required: [...baseRequired, ...personRequired],
+    required: [...baseRequired],
   };
 
   const instructions =
@@ -193,27 +262,20 @@ exports.handler = async (event) => {
     "IMPORTANT: Do not invent facts.\n" +
     "Output valid JSON matching the schema.\n" +
     "Rules:\n" +
-    "- href: you may leave as empty or placeholder; server will overwrite.\n" +
+    "- href: you may leave as placeholder; server overwrites with Wikipedia URL or 'kein Wiki'.\n" +
     "- image: placeholder filename from title: firstname_lastname.jpg (lowercase, underscores). No folders.\n" +
-    "- Summary: English, as short as possible, and MUST answer:\n" +
+    "- Summary: English, short, and MUST answer:\n" +
     "  (1) Why is the person recognized among scientists?\n" +
     "  (2) What is their contribution to space settlement?\n" +
-    "  If either is not verifiable from the provided context, explicitly say so (e.g., 'Not established from provided context').\n" +
+    "  If either is not verifiable from the provided context, explicitly say so.\n" +
     "- Tags: 2–6 short lowercase slug tags (letters/numbers/underscore/hyphen only).\n" +
-    "- birthYear: For persons (type='person'), you MUST ALWAYS provide the birth year as an integer (e.g., 1971). Look up the information if needed.\n" +
-    "- deathYear: For persons (type='person'), you MUST ALWAYS provide either: (a) the death year as an integer if the person is deceased (e.g., 2023), OR (b) null if the person is still alive. Look up the information if needed.\n";
+    "- Do not add birthYear/deathYear unless you are certain. The server will fetch years from Wikidata when possible.\n";
 
   const input =
     `Create an autofill suggestion for this entry.\n` +
     `type: ${type}\n` +
     `title: ${title}\n` +
-    `current (may be empty):\n${JSON.stringify(current, null, 2)}\n` +
-    (type === "person" 
-      ? `\nIMPORTANT: Since this is a person (type='person'), you MUST ALWAYS include birthYear and deathYear in your response.\n` +
-        `- birthYear: integer (e.g., 1971) - REQUIRED, look up if needed\n` +
-        `- deathYear: integer if deceased (e.g., 2023), or null if still alive - REQUIRED, look up if needed\n` +
-        `Do NOT omit these fields. They are required for persons.\n`
-      : ``);
+    `current (may be empty):\n${JSON.stringify(current, null, 2)}\n`;
 
   const openaiPayload = {
     model: "gpt-4o-mini",
@@ -223,7 +285,7 @@ exports.handler = async (event) => {
     text: {
       format: {
         type: "json_schema",
-        name: "autofill_v3",
+        name: "autofill_v4",
         strict: true,
         schema,
       },
@@ -231,10 +293,17 @@ exports.handler = async (event) => {
   };
 
   try {
-    // 1) Get Wikipedia URL (factual) in parallel with LLM generation
-    const wikiPromise = wikipediaUrlForTitle(title);
+    // Wikipedia URL + Wikidata years in parallel
+    const wikiUrlPromise = wikipediaUrlForTitle(title);
+    const yearsPromise =
+      type === "person"
+        ? (async () => {
+            const qid = await wikipediaQidForTitle(title);
+            if (!qid) return null;
+            return await wikidataYearsForQid(qid);
+          })()
+        : Promise.resolve(null);
 
-    // 2) Get LLM output
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -253,28 +322,22 @@ exports.handler = async (event) => {
       return text(500, `Could not extract structured JSON from OpenAI response.\nRAW:\n${raw}`);
     }
 
-    const wikiUrl = await wikiPromise;
+    const [wikiUrl, years] = await Promise.all([wikiUrlPromise, yearsPromise]);
 
-    // Normalize & enforce defaults
     const obj = { ...extracted };
 
     obj.type = String(obj.type || type || "topic");
     obj.title = title;
 
-    // href: Wikipedia URL or "kein Wiki"
     obj.href = wikiUrl || "kein Wiki";
-
-    // image: enforce placeholder rule
     obj.image = String(obj.image || toImagePlaceholder(title));
 
-    // summary: must be short English and not empty
     obj.summary = String(obj.summary || "").trim();
     if (obj.summary.length < 20) {
       obj.summary =
         "Recognition among scientists: not established from provided context. Contribution to space settlement: not established from provided context.";
     }
 
-    // tags: enforce 2–6, lowercase, slug-ish
     const cleanTag = (t) =>
       String(t || "")
         .toLowerCase()
@@ -286,7 +349,6 @@ exports.handler = async (event) => {
     let tags = Array.isArray(obj.tags) ? obj.tags.map(cleanTag).filter(Boolean) : [];
     tags = [...new Set(tags)].slice(0, 6);
 
-    // Pad if too few (should be rare with strict+minItems)
     const pad = ["space_settlement", "spaceflight", "reference", "biography"];
     while (tags.length < 2 && pad.length) {
       const next = pad.shift();
@@ -294,20 +356,15 @@ exports.handler = async (event) => {
     }
     obj.tags = tags.slice(0, 6);
 
-    // For persons, include birthYear and deathYear if provided
+    // Enforce factual years for persons from Wikidata if available.
     if (type === "person") {
-      // Always try to include birthYear if the AI provided it
-      if (extracted.birthYear != null && typeof extracted.birthYear === "number") {
-        obj.birthYear = extracted.birthYear;
+      if (years && typeof years.birthYear === "number") {
+        obj.birthYear = years.birthYear;
       }
-      // Handle deathYear: if number, person is deceased; if null, person is alive
-      if (extracted.deathYear != null && typeof extracted.deathYear === "number") {
-        obj.deathYear = extracted.deathYear;
-      } else if (extracted.deathYear === null) {
-        // Person is still alive - set to null explicitly so frontend knows to clear the field
-        obj.deathYear = null;
+      // deathYear: integer if deceased, otherwise null if no P570
+      if (years) {
+        obj.deathYear = typeof years.deathYear === "number" ? years.deathYear : null;
       }
-      // If deathYear is undefined, the AI didn't provide it - we also don't set it
     }
 
     return json(200, obj);
