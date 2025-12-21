@@ -1,6 +1,7 @@
 // assets/js/app.js
 // Loads items from Cloudflare Worker /items (D1) and renders cards.
 // Provides search + type filter.
+// Sorts globally by sortYear (DESC), fallback by title (ASC).
 
 const WORKER_BASE =
   "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
@@ -62,6 +63,17 @@ function normalizeTags(tags) {
   return [];
 }
 
+function safeJsonParse(value) {
+  if (value == null) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function normalizeItem(raw) {
   const it = { ...(raw || {}) };
 
@@ -73,6 +85,17 @@ function normalizeItem(raw) {
 
   // Normalize legacy image
   it.image = typeof it.image === "string" ? it.image.trim() : "";
+
+  // Normalize meta (worker returns object; older rows may have null/string)
+  it.meta = safeJsonParse(it.meta);
+
+  // Normalize sortYear
+  if (typeof it.sortYear === "string") {
+    const n = parseInt(it.sortYear, 10);
+    it.sortYear = Number.isFinite(n) ? n : null;
+  } else if (typeof it.sortYear !== "number") {
+    it.sortYear = null;
+  }
 
   return it;
 }
@@ -91,6 +114,15 @@ function resolveImagePath(item) {
   const type = String(item?.type ?? "").trim().toLowerCase();
 
   const folderByType = {
+    people: "people",
+    projects: "projects",
+    concepts: "concepts",
+    orgs: "orgs",
+    topics: "topics",
+    books: "books",
+    movies: "movies",
+
+    // legacy support
     person: "people",
     project: "projects",
     concept: "concepts",
@@ -129,12 +161,17 @@ function passesFilter(item, q, filter) {
   if (filter !== "all" && type !== filter) return false;
   if (!q) return true;
 
+  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+
   const hay = [
     item.title,
     item.summary,
     item.href,
     ...(Array.isArray(item.tags) ? item.tags : []),
     item.type,
+
+    // include meta values for search (strings + numbers + arrays)
+    meta ? JSON.stringify(meta) : "",
   ]
     .map(normalizeText)
     .join(" ");
@@ -152,6 +189,47 @@ function formatPersonTitle(title, birthYear, deathYear) {
   else if (birthYear != null) yearStr += "-";
 
   return yearStr ? `${title} (${yearStr})` : title;
+}
+
+function getPeopleYears(item) {
+  // Prefer meta, fallback to legacy columns
+  const meta = item?.meta && typeof item.meta === "object" ? item.meta : null;
+
+  const birth =
+    meta?.birthYear != null
+      ? parseInt(meta.birthYear, 10)
+      : item.birthYear != null
+      ? parseInt(item.birthYear, 10)
+      : null;
+
+  const death =
+    meta?.deathYear != null
+      ? parseInt(meta.deathYear, 10)
+      : item.deathYear != null
+      ? parseInt(item.deathYear, 10)
+      : null;
+
+  return {
+    birthYear: Number.isFinite(birth) ? birth : null,
+    deathYear: Number.isFinite(death) ? death : null,
+  };
+}
+
+function sortItemsByYear(items) {
+  return [...items].sort((a, b) => {
+    const ay = typeof a.sortYear === "number" ? a.sortYear : null;
+    const by = typeof b.sortYear === "number" ? b.sortYear : null;
+
+    if (ay != null && by != null && ay !== by) {
+      return by - ay; // DESC
+    }
+    if (ay != null && by == null) return -1;
+    if (ay == null && by != null) return 1;
+
+    const at = String(a.title || "").toLowerCase();
+    const bt = String(b.title || "").toLowerCase();
+    return at.localeCompare(bt);
+  });
 }
 
 function render(items) {
@@ -180,11 +258,9 @@ function render(items) {
       const imagePath = escapeHtml(resolveImagePath(item));
       const type = String(item.type || "").toLowerCase();
 
-      if (type === "person") {
-        const birthYear =
-          item.birthYear != null ? parseInt(item.birthYear, 10) : null;
-        const deathYear =
-          item.deathYear != null ? parseInt(item.deathYear, 10) : null;
+      // Support new type "people" and legacy "person"
+      if (type === "people" || type === "person") {
+        const { birthYear, deathYear } = getPeopleYears(item);
         title = escapeHtml(formatPersonTitle(item.title || "", birthYear, deathYear));
       }
 
@@ -260,19 +336,8 @@ async function init() {
     return;
   }
 
-  // Sort: persons by birthYear (ascending), others by title
-  allItems.sort((a, b) => {
-    if (a.type === "person" && b.type === "person") {
-      const aYear = a.birthYear != null ? parseInt(a.birthYear, 10) : null;
-      const bYear = b.birthYear != null ? parseInt(b.birthYear, 10) : null;
-
-      if (aYear != null && bYear != null) return aYear - bYear;
-      if (aYear != null) return -1;
-      if (bYear != null) return 1;
-    }
-
-    return String(a.title || "").localeCompare(String(b.title || ""));
-  });
+  // NEW: Global sort by sortYear (DESC), fallback by title (ASC)
+  allItems = sortItemsByYear(allItems);
 
   els.chips.forEach((btn) => {
     btn.addEventListener("click", () => {
