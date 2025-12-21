@@ -71,35 +71,63 @@ function normalizeTags(tags) {
   return [];
 }
 
-function buildItem() {
-  const tags = getValue("tags")
+function parseCommaList(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return [];
+  return t
     .split(",")
-    .map((t) => t.trim())
+    .map((x) => x.trim())
     .filter(Boolean);
+}
+
+function parseIntOrNull(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
+  const n = parseInt(t, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function buildItem() {
+  const tags = parseCommaList(getValue("tags"));
 
   const item = {
     type: getValue("type"),
     title: getValue("title"),
     href: getValue("href"),
-    // image: getValue("image"), // legacy optional, wird NICHT mehr published
-    imageUrl: getValue("imageUrl"), // new
+    imageUrl: getValue("imageUrl"),
     summary: getValue("summary"),
     tags,
+    meta: null,
   };
 
-  if (item.type === "person") {
-    const birthYear = getValue("birthYear");
-    const deathYear = getValue("deathYear");
+  // NEW: people specific fields go into meta
+  if (item.type === "people") {
+    const birthYear = parseIntOrNull(getValue("birthYear"));
+    const deathYear = parseIntOrNull(getValue("deathYear"));
 
-    if (birthYear) {
-      const year = parseInt(birthYear, 10);
-      if (!isNaN(year)) item.birthYear = year;
-    }
+    const meta = {};
 
-    if (deathYear) {
-      const year = parseInt(deathYear, 10);
-      if (!isNaN(year)) item.deathYear = year;
-    }
+    if (birthYear != null) meta.birthYear = birthYear;
+    if (deathYear != null) meta.deathYear = deathYear;
+
+    // Optional future fields (only if the corresponding inputs exist in admin.html)
+    // nationality, affiliations etc. can be added later without breaking anything.
+    // If inputs are not present, these will stay empty.
+    const nat = $("nationality") ? parseCommaList(getValue("nationality")) : [];
+    const aff = $("affiliations") ? parseCommaList(getValue("affiliations")) : [];
+    const fields = $("fields") ? parseCommaList(getValue("fields")) : [];
+    const roles = $("roles") ? parseCommaList(getValue("roles")) : [];
+    const activeStartYear = $("activeStartYear") ? parseIntOrNull(getValue("activeStartYear")) : null;
+    const activeEndYear = $("activeEndYear") ? parseIntOrNull(getValue("activeEndYear")) : null;
+
+    if (nat.length) meta.nationality = nat;
+    if (aff.length) meta.affiliations = aff;
+    if (fields.length) meta.fields = fields;
+    if (roles.length) meta.roles = roles;
+    if (activeStartYear != null) meta.activeStartYear = activeStartYear;
+    if (activeEndYear != null) meta.activeEndYear = activeEndYear;
+
+    item.meta = Object.keys(meta).length ? meta : null;
   }
 
   return item;
@@ -229,13 +257,9 @@ async function autofillFromAI() {
   setValue("summary", data.summary);
   setValue("tags", data.tags);
 
-  // Wichtig: imageUrl kommt NICHT aus Autofill, sondern aus Upload.
-  // Wir lassen imageUrl so wie es ist.
-  // Wenn du willst, kannst du es hier leeren:
-  // setValue("imageUrl", "");
-
+  // People-specific years
   const currentType = getValue("type");
-  if (currentType === "person") {
+  if (currentType === "people") {
     if (data.birthYear != null && typeof data.birthYear === "number") {
       setValue("birthYear", String(data.birthYear));
     } else {
@@ -268,8 +292,7 @@ async function publishItem() {
 
   const item = buildItem();
 
-  // Hard rule: Worker/D1 hat kein "image" Feld mehr.
-  // Publish nur das neue Modell.
+  // Publish base fields + meta
   const payload = {
     type: item.type,
     title: item.title,
@@ -277,8 +300,8 @@ async function publishItem() {
     imageUrl: item.imageUrl,
     summary: item.summary,
     tags: Array.isArray(item.tags) ? item.tags : [],
-    birthYear: item.birthYear ?? null,
-    deathYear: item.deathYear ?? null,
+    meta: item.meta, // NEW
+    // sortYear absichtlich weggelassen -> Worker berechnet
   };
 
   setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
@@ -402,22 +425,46 @@ async function loadPublished() {
         setValue("type", it.type);
         setValue("title", it.title);
         setValue("href", it.href);
-
-        // legacy image field exists maybe in UI; we ignore it for publish
-        // setValue("image", it.image);
-
         setValue("imageUrl", it.imageUrl || "");
         setValue("summary", it.summary);
 
         const tags = normalizeTags(it.tags);
         setValue("tags", tags);
 
-        if (it.type === "person") {
-          setValue("birthYear", it.birthYear != null ? String(it.birthYear) : "");
-          setValue("deathYear", it.deathYear != null ? String(it.deathYear) : "");
+        // People years: prefer meta, fallback to legacy columns
+        if (it.type === "people") {
+          const by =
+            it?.meta?.birthYear != null
+              ? it.meta.birthYear
+              : it.birthYear != null
+              ? it.birthYear
+              : "";
+          const dy =
+            it?.meta?.deathYear != null
+              ? it.meta.deathYear
+              : it.deathYear != null
+              ? it.deathYear
+              : "";
+
+          setValue("birthYear", by !== "" ? String(by) : "");
+          setValue("deathYear", dy !== "" ? String(dy) : "");
+
+          // Optional future fields
+          if ($("nationality")) setValue("nationality", it?.meta?.nationality ?? []);
+          if ($("affiliations")) setValue("affiliations", it?.meta?.affiliations ?? []);
+          if ($("fields")) setValue("fields", it?.meta?.fields ?? []);
+          if ($("roles")) setValue("roles", it?.meta?.roles ?? []);
+          if ($("activeStartYear")) setValue("activeStartYear", it?.meta?.activeStartYear ?? "");
+          if ($("activeEndYear")) setValue("activeEndYear", it?.meta?.activeEndYear ?? "");
         } else {
           setValue("birthYear", "");
           setValue("deathYear", "");
+          if ($("nationality")) setValue("nationality", "");
+          if ($("affiliations")) setValue("affiliations", "");
+          if ($("fields")) setValue("fields", "");
+          if ($("roles")) setValue("roles", "");
+          if ($("activeStartYear")) setValue("activeStartYear", "");
+          if ($("activeEndYear")) setValue("activeEndYear", "");
         }
 
         setOutput(JSON.stringify(buildItem(), null, 2));
@@ -498,19 +545,19 @@ $("refreshList")?.addEventListener("click", () => {
   loadPublished().catch(console.error);
 });
 
-// Show/hide person fields based on type
+// Show/hide people fields based on type
 $("type")?.addEventListener("change", () => {
   const personFields = document.getElementById("personFields");
   if (personFields) {
-    personFields.style.display = getValue("type") === "person" ? "block" : "none";
+    personFields.style.display = getValue("type") === "people" ? "block" : "none";
   }
 });
 
 // initial
 loadPublished().catch(console.error);
 
-// Show/hide person fields on page load
+// Show/hide people fields on page load
 const personFields = document.getElementById("personFields");
 if (personFields) {
-  personFields.style.display = getValue("type") === "person" ? "block" : "none";
+  personFields.style.display = getValue("type") === "people" ? "block" : "none";
 }
