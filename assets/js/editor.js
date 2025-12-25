@@ -130,6 +130,25 @@ function buildItem() {
     item.meta = Object.keys(meta).length ? meta : null;
   }
 
+// NEW: books specific fields go into meta
+if (item.type === "books") {
+  const meta = {};
+
+  const authors = $("authors") ? parseCommaList(getValue("authors")) : [];
+  const publishedYear = parseIntOrNull(getValue("publishedYear"));
+  const publisher = getValue("publisher");
+  const isbn = getValue("isbn");
+  const language = getValue("language");
+
+  if (authors.length) meta.authors = authors;
+  if (publishedYear != null) meta.publishedYear = publishedYear;
+  if (publisher) meta.publisher = publisher;
+  if (isbn) meta.isbn = isbn;
+  if (language) meta.language = language;
+
+  item.meta = Object.keys(meta).length ? meta : null;
+}
+
   return item;
 }
 
@@ -432,42 +451,57 @@ async function loadPublished() {
         setValue("tags", tags);
 
         // People years: prefer meta, fallback to legacy columns
-        if (it.type === "people") {
-          const by =
-            it?.meta?.birthYear != null
-              ? it.meta.birthYear
-              : it.birthYear != null
-              ? it.birthYear
-              : "";
-          const dy =
-            it?.meta?.deathYear != null
-              ? it.meta.deathYear
-              : it.deathYear != null
-              ? it.deathYear
-              : "";
+// ---------- TYPE-SPECIFIC FIELDS ----------
+if (it.type === "people") {
+  // people fields
+  const by =
+    it?.meta?.birthYear != null
+      ? it.meta.birthYear
+      : it.birthYear != null
+      ? it.birthYear
+      : "";
 
-          setValue("birthYear", by !== "" ? String(by) : "");
-          setValue("deathYear", dy !== "" ? String(dy) : "");
+  const dy =
+    it?.meta?.deathYear != null
+      ? it.meta.deathYear
+      : it.deathYear != null
+      ? it.deathYear
+      : "";
 
-          // Optional future fields
-          if ($("nationality")) setValue("nationality", it?.meta?.nationality ?? []);
-          if ($("affiliations")) setValue("affiliations", it?.meta?.affiliations ?? []);
-          if ($("fields")) setValue("fields", it?.meta?.fields ?? []);
-          if ($("roles")) setValue("roles", it?.meta?.roles ?? []);
-          if ($("activeStartYear")) setValue("activeStartYear", it?.meta?.activeStartYear ?? "");
-          if ($("activeEndYear")) setValue("activeEndYear", it?.meta?.activeEndYear ?? "");
-        } else {
-          setValue("birthYear", "");
-          setValue("deathYear", "");
-          if ($("nationality")) setValue("nationality", "");
-          if ($("affiliations")) setValue("affiliations", "");
-          if ($("fields")) setValue("fields", "");
-          if ($("roles")) setValue("roles", "");
-          if ($("activeStartYear")) setValue("activeStartYear", "");
-          if ($("activeEndYear")) setValue("activeEndYear", "");
-        }
+  setValue("birthYear", by !== "" ? String(by) : "");
+  setValue("deathYear", dy !== "" ? String(dy) : "");
 
-        setOutput(JSON.stringify(buildItem(), null, 2));
+  // clear book fields
+  if ($("authors")) setValue("authors", "");
+  if ($("publishedYear")) setValue("publishedYear", "");
+  if ($("publisher")) setValue("publisher", "");
+  if ($("isbn")) setValue("isbn", "");
+  if ($("language")) setValue("language", "");
+
+} else if (it.type === "books") {
+  // book fields
+  if ($("authors")) setValue("authors", it?.meta?.authors ?? []);
+  if ($("publishedYear")) setValue("publishedYear", it?.meta?.publishedYear ?? "");
+  if ($("publisher")) setValue("publisher", it?.meta?.publisher ?? "");
+  if ($("isbn")) setValue("isbn", it?.meta?.isbn ?? "");
+  if ($("language")) setValue("language", it?.meta?.language ?? "");
+
+  // clear people fields
+  setValue("birthYear", "");
+  setValue("deathYear", "");
+
+} else {
+  // clear ALL type-specific fields
+  setValue("birthYear", "");
+  setValue("deathYear", "");
+
+  if ($("authors")) setValue("authors", "");
+  if ($("publishedYear")) setValue("publishedYear", "");
+  if ($("publisher")) setValue("publisher", "");
+  if ($("isbn")) setValue("isbn", "");
+  if ($("language")) setValue("language", "");
+}
+setOutput(JSON.stringify(buildItem(), null, 2));
       } catch (e) {
         console.error(e);
       }
@@ -547,9 +581,15 @@ $("refreshList")?.addEventListener("click", () => {
 
 // Show/hide people fields based on type
 $("type")?.addEventListener("change", () => {
-  const personFields = document.getElementById("personFields");
+  const personFields = $("personFields");
+  const bookFields = $("bookFields");
+
   if (personFields) {
     personFields.style.display = getValue("type") === "people" ? "block" : "none";
+  }
+
+  if (bookFields) {
+    bookFields.style.display = getValue("type") === "books" ? "block" : "none";
   }
 });
 
