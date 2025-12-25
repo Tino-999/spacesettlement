@@ -86,6 +86,11 @@ function parseIntOrNull(s) {
   return Number.isFinite(n) ? n : null;
 }
 
+function isBookType() {
+  const t = getValue("type").toLowerCase();
+  return t === "book" || t === "books";
+}
+
 function requireAdminToken(actionLabel) {
   const token = prompt(`Admin token (x-admin-token) für ${actionLabel}:`);
   return token && token.trim() ? token.trim() : null;
@@ -95,7 +100,7 @@ function requireAdminToken(actionLabel) {
 // Build item payload (with meta)
 // -------------------------
 function buildItem() {
-  const type = getValue("type"); // expects: person, project, org, topic, concept, book, movie
+  const type = getValue("type"); // person, project, org, topic, concept, book, movie
   const tags = parseCommaList(getValue("tags"));
 
   const item = {
@@ -108,7 +113,7 @@ function buildItem() {
     meta: null,
   };
 
-  // PERSON meta (if your admin.html has these fields; optional)
+  // PERSON meta
   if (type === "person") {
     const meta = {};
     const birthYear = parseIntOrNull(getValue("birthYear"));
@@ -118,9 +123,10 @@ function buildItem() {
     item.meta = Object.keys(meta).length ? meta : null;
   }
 
-  // BOOK meta (if bookFields exist; optional)
-  if (type === "book") {
+  // BOOK meta
+  if (isBookType()) {
     const meta = {};
+
     if ($("authors")) {
       const authors = parseCommaList(getValue("authors"));
       if (authors.length) meta.authors = authors;
@@ -142,7 +148,6 @@ function buildItem() {
       if (language) meta.language = language;
     }
 
-    // store these if we have them from worker
     if (lastBookFacts?.openLibraryId) meta.openLibraryId = lastBookFacts.openLibraryId;
     if (lastBookFacts?.wikipediaUrl) meta.wikipediaUrl = lastBookFacts.wikipediaUrl;
 
@@ -211,7 +216,6 @@ async function publishItem() {
 
   const item = buildItem();
 
-  // Minimal validation
   if (!item.type) return setOutput("Fehler: type fehlt.");
   if (!item.title) return setOutput("Fehler: title fehlt.");
 
@@ -242,7 +246,6 @@ async function publishItem() {
   setOutput({ ok: true, published: parsed.json });
   alert("Item veröffentlicht ✔");
 
-  // reset suggestion cache because exists flags may change
   latestBookSuggestions = [];
   lastBookQuery = "";
 
@@ -315,7 +318,6 @@ async function loadPublished() {
     </div>
   `;
 
-  // Load into form
   publishedEl.querySelectorAll("button[data-load]").forEach((btn) => {
     btn.addEventListener("click", () => {
       try {
@@ -328,7 +330,6 @@ async function loadPublished() {
         setValue("summary", it.summary);
         setValue("tags", normalizeTags(it.tags));
 
-        // Person fields
         if (it.type === "person") {
           setValue("birthYear", it?.meta?.birthYear ?? "");
           setValue("deathYear", it?.meta?.deathYear ?? "");
@@ -337,8 +338,7 @@ async function loadPublished() {
           setValue("deathYear", "");
         }
 
-        // Book fields
-        if (it.type === "book") {
+        if ((it.type || "").toLowerCase() === "book" || (it.type || "").toLowerCase() === "books") {
           if ($("authors")) setValue("authors", it?.meta?.authors ?? []);
           if ($("publishedYear")) setValue("publishedYear", it?.meta?.publishedYear ?? "");
           if ($("publisher")) setValue("publisher", it?.meta?.publisher ?? "");
@@ -359,7 +359,6 @@ async function loadPublished() {
     });
   });
 
-  // Delete
   publishedEl.querySelectorAll("button[data-del-id]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = btn.getAttribute("data-del-id");
@@ -409,14 +408,12 @@ async function booksAutofillFacts(openLibraryId) {
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || "books_autofill_failed");
 
-  // Fill fields
   if ($("authors")) setValue("authors", data.authors || []);
   if ($("publishedYear")) setValue("publishedYear", data.publishedYear ?? "");
   if ($("publisher")) setValue("publisher", data.publisher || "");
   if ($("isbn")) setValue("isbn", data.isbn || "");
   if ($("language")) setValue("language", data.language || "");
 
-  // Set href from wikipediaUrl if href empty
   if (!getValue("href") && data.wikipediaUrl) setValue("href", data.wikipediaUrl);
 
   lastBookFacts = {
@@ -466,22 +463,24 @@ $("publish")?.addEventListener("click", () => publishItem().catch((e) => setOutp
 $("refreshList")?.addEventListener("click", () => loadPublished().catch(console.error));
 $("uploadImage")?.addEventListener("click", () => uploadImageToR2().catch(console.error));
 
-// show/hide person fields based on type
 $("type")?.addEventListener("change", () => {
   const personFields = $("personFields");
   const bookFields = $("bookFields");
 
   if (personFields) personFields.style.display = getValue("type") === "person" ? "block" : "none";
-  if (bookFields) bookFields.style.display = getValue("type") === "book" ? "block" : "none";
+  if (bookFields) bookFields.style.display = isBookType() ? "block" : "none";
 });
 
 // Books: live suggestions
 $("title")?.addEventListener("input", async () => {
-  if (getValue("type") !== "book") return;
+  if (!isBookType()) return;
 
   const q = getValue("title");
   const list = document.getElementById("titleSuggestions");
-  if (!list) return;
+  if (!list) {
+    setOutput('Fehler: <datalist id="titleSuggestions"> fehlt in admin.html.');
+    return;
+  }
 
   list.innerHTML = "";
   if (!q || q.length < 2) return;
@@ -504,9 +503,9 @@ $("title")?.addEventListener("input", async () => {
   });
 });
 
-// Books: select title => autofill + enrich (only if not exists)
+// Books: select title => autofill + enrich
 $("title")?.addEventListener("change", async () => {
-  if (getValue("type") !== "book") return;
+  if (!isBookType()) return;
 
   const title = getValue("title");
   const match = latestBookSuggestions.find(
@@ -532,11 +531,10 @@ $("title")?.addEventListener("change", async () => {
   }
 });
 
-// initial list
+// initial
 loadPublished().catch(console.error);
 
-// initial visibility
 const pf = $("personFields");
 if (pf) pf.style.display = getValue("type") === "person" ? "block" : "none";
 const bf = $("bookFields");
-if (bf) bf.style.display = getValue("type") === "book" ? "block" : "none";
+if (bf) bf.style.display = isBookType() ? "block" : "none";
