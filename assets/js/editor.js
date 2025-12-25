@@ -11,11 +11,15 @@ const WORKER_BASE =
 const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
 const ITEMS_URL = `${WORKER_BASE}/items`;
 
-// Autofill bleibt vorerst auf Netlify
+// NEW: Open Library suggestions via Worker
+const BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest?q=`;
+
+// Autofill bleibt vorerst auf Netlify (wird später ersetzt durch Worker KI Autofill)
 const AUTOFILL_URL = "/.netlify/functions/autofill";
 
-// NEW: cache for suggestion loading
-let cachedItemsForSuggestions = null;
+// NEW: cache for latest OL suggestions (per query)
+let latestBookSuggestions = [];
+let lastSuggestQuery = "";
 
 function $(id) {
   return document.getElementById(id);
@@ -62,12 +66,10 @@ function normalizeTags(tags) {
   if (typeof tags === "string") {
     const t = tags.trim();
     if (!t) return [];
-    // JSON string from D1?
     try {
       const parsed = JSON.parse(t);
       if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
     } catch {}
-    // fallback: comma separated
     return t.split(",").map((x) => x.trim()).filter(Boolean);
   }
 
@@ -103,17 +105,15 @@ function buildItem() {
     meta: null,
   };
 
-  // NEW: people specific fields go into meta
+  // people -> meta
   if (item.type === "people") {
     const birthYear = parseIntOrNull(getValue("birthYear"));
     const deathYear = parseIntOrNull(getValue("deathYear"));
 
     const meta = {};
-
     if (birthYear != null) meta.birthYear = birthYear;
     if (deathYear != null) meta.deathYear = deathYear;
 
-    // Optional meta fields for people (only if inputs exist)
     const nat = $("nationality") ? parseCommaList(getValue("nationality")) : [];
     const aff = $("affiliations") ? parseCommaList(getValue("affiliations")) : [];
     const fields = $("fields") ? parseCommaList(getValue("fields")) : [];
@@ -135,7 +135,7 @@ function buildItem() {
     item.meta = Object.keys(meta).length ? meta : null;
   }
 
-  // NEW: books specific fields go into meta
+  // books -> meta
   if (item.type === "books") {
     const meta = {};
 
@@ -228,28 +228,42 @@ async function uploadImageToR2() {
 }
 
 // -------------------------
-// SUGGESTIONS (books title)
+// OPEN LIBRARY SUGGEST (via Worker)
 // -------------------------
-async function loadBookTitleSuggestions() {
-  if (cachedItemsForSuggestions) return cachedItemsForSuggestions;
+async function fetchBookSuggestionsFromWorker(q) {
+  const res = await fetch(`${BOOK_SUGGEST_URL}${encodeURIComponent(q)}`, {
+    cache: "no-store",
+  });
+  const parsed = await safeReadJson(res);
 
-  const res = await fetch(ITEMS_URL, { cache: "no-store" });
-  const data = await res.json();
-
-  if (!data || !Array.isArray(data.items)) {
-    cachedItemsForSuggestions = [];
-    return cachedItemsForSuggestions;
+  if (!res.ok) {
+    return { ok: false, error: parsed.ok ? parsed.json : parsed.raw };
   }
+  const data = parsed.ok ? parsed.json : null;
+  const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : [];
+  return { ok: true, suggestions };
+}
 
-  cachedItemsForSuggestions = data.items.filter(
-    (it) => it.type === "books" && typeof it.title === "string"
-  );
-
-  return cachedItemsForSuggestions;
+function setSuggestionDebugOutputForBooks(q, suggestions) {
+  // Minimal: zeigt ob es Treffer gibt und ob "exists" dabei ist
+  // Kein Layout, nur Output-Pre.
+  const summary = {
+    query: q,
+    count: suggestions.length,
+    top: suggestions.slice(0, 5).map((s) => ({
+      title: s.title,
+      publishedYear: s.publishedYear ?? null,
+      authors: Array.isArray(s.authors) ? s.authors.slice(0, 3) : [],
+      exists: !!s.exists,
+      openLibraryId: s.openLibraryId ?? null,
+      isbn: s.isbn ?? null,
+    })),
+  };
+  setOutput("Suggestions (Open Library via Worker):\n" + JSON.stringify(summary, null, 2));
 }
 
 // -------------------------
-// AI AUTOFILL (preview only)
+// AI AUTOFILL (legacy Netlify) - will be replaced
 // -------------------------
 async function autofillFromAI() {
   const title = getValue("title");
@@ -325,11 +339,21 @@ async function autofillFromAI() {
 
   // Books fields (if autofill returns them)
   if (currentType === "books") {
-    if ($("authors")) setValue("authors", Array.isArray(data.authors) ? data.authors : data.meta?.authors ?? []);
-    if ($("publishedYear")) setValue("publishedYear", data.publishedYear ?? data.meta?.publishedYear ?? "");
-    if ($("publisher")) setValue("publisher", data.publisher ?? data.meta?.publisher ?? "");
+    if ($("authors"))
+      setValue(
+        "authors",
+        Array.isArray(data.authors) ? data.authors : data.meta?.authors ?? []
+      );
+    if ($("publishedYear"))
+      setValue(
+        "publishedYear",
+        data.publishedYear ?? data.meta?.publishedYear ?? ""
+      );
+    if ($("publisher"))
+      setValue("publisher", data.publisher ?? data.meta?.publisher ?? "");
     if ($("isbn")) setValue("isbn", data.isbn ?? data.meta?.isbn ?? "");
-    if ($("language")) setValue("language", data.language ?? data.meta?.language ?? "");
+    if ($("language"))
+      setValue("language", data.language ?? data.meta?.language ?? "");
   } else {
     if ($("authors")) setValue("authors", "");
     if ($("publishedYear")) setValue("publishedYear", "");
@@ -354,7 +378,6 @@ async function publishItem() {
 
   const item = buildItem();
 
-  // Publish base fields + meta
   const payload = {
     type: item.type,
     title: item.title,
@@ -362,8 +385,7 @@ async function publishItem() {
     imageUrl: item.imageUrl,
     summary: item.summary,
     tags: Array.isArray(item.tags) ? item.tags : [],
-    meta: item.meta, // NEW
-    // sortYear absichtlich weggelassen -> Worker berechnet
+    meta: item.meta,
   };
 
   setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
@@ -399,6 +421,10 @@ async function publishItem() {
 
   setOutput("✔ Published\n\n" + JSON.stringify(parsed.json, null, 2));
   alert("Item veröffentlicht ✔");
+
+  // after publish, suggestions might change (exists flag)
+  lastSuggestQuery = "";
+  latestBookSuggestions = [];
 
   await loadPublished();
 }
@@ -512,7 +538,6 @@ async function loadPublished() {
           setValue("birthYear", by !== "" ? String(by) : "");
           setValue("deathYear", dy !== "" ? String(dy) : "");
 
-          // optional people meta
           if ($("nationality")) setValue("nationality", it?.meta?.nationality ?? []);
           if ($("affiliations")) setValue("affiliations", it?.meta?.affiliations ?? []);
           if ($("fields")) setValue("fields", it?.meta?.fields ?? []);
@@ -520,7 +545,6 @@ async function loadPublished() {
           if ($("activeStartYear")) setValue("activeStartYear", it?.meta?.activeStartYear ?? "");
           if ($("activeEndYear")) setValue("activeEndYear", it?.meta?.activeEndYear ?? "");
 
-          // clear book fields
           if ($("authors")) setValue("authors", "");
           if ($("publishedYear")) setValue("publishedYear", "");
           if ($("publisher")) setValue("publisher", "");
@@ -528,14 +552,12 @@ async function loadPublished() {
           if ($("language")) setValue("language", "");
 
         } else if (it.type === "books") {
-          // book fields
           if ($("authors")) setValue("authors", it?.meta?.authors ?? []);
           if ($("publishedYear")) setValue("publishedYear", it?.meta?.publishedYear ?? "");
           if ($("publisher")) setValue("publisher", it?.meta?.publisher ?? "");
           if ($("isbn")) setValue("isbn", it?.meta?.isbn ?? "");
           if ($("language")) setValue("language", it?.meta?.language ?? "");
 
-          // clear people fields
           setValue("birthYear", "");
           setValue("deathYear", "");
 
@@ -547,7 +569,6 @@ async function loadPublished() {
           if ($("activeEndYear")) setValue("activeEndYear", "");
 
         } else {
-          // clear ALL type-specific fields
           setValue("birthYear", "");
           setValue("deathYear", "");
 
@@ -602,8 +623,9 @@ async function loadPublished() {
         return;
       }
 
-      // reset suggestion cache to include deletions
-      cachedItemsForSuggestions = null;
+      // suggestions exist flag may change
+      lastSuggestQuery = "";
+      latestBookSuggestions = [];
 
       await loadPublished();
     });
@@ -660,27 +682,38 @@ $("type")?.addEventListener("change", () => {
   }
 });
 
-// NEW: suggestions on typing book titles
+// LIVE: suggestions from Open Library via Worker
 $("title")?.addEventListener("input", async () => {
   if (getValue("type") !== "books") return;
 
-  const q = getValue("title").toLowerCase();
+  const q = getValue("title").trim();
   const list = document.getElementById("titleSuggestions");
   if (!list) return;
 
   list.innerHTML = "";
   if (!q || q.length < 2) return;
 
-  const items = await loadBookTitleSuggestions();
+  // avoid refetching same query
+  if (q.toLowerCase() !== lastSuggestQuery.toLowerCase()) {
+    lastSuggestQuery = q;
 
-  items
-    .filter((it) => it.title.toLowerCase().includes(q))
-    .slice(0, 10)
-    .forEach((it) => {
-      const opt = document.createElement("option");
-      opt.value = it.title;
-      list.appendChild(opt);
-    });
+    const result = await fetchBookSuggestionsFromWorker(q);
+    if (!result.ok) {
+      setOutput("Suggest Fehler:\n" + JSON.stringify(result.error, null, 2));
+      latestBookSuggestions = [];
+      return;
+    }
+    latestBookSuggestions = result.suggestions;
+
+    // optional debug in output (keeps layout unchanged)
+    setSuggestionDebugOutputForBooks(q, latestBookSuggestions);
+  }
+
+  latestBookSuggestions.slice(0, 10).forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.title;
+    list.appendChild(opt);
+  });
 });
 
 // initial
