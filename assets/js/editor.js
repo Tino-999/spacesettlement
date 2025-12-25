@@ -1,12 +1,10 @@
 // assets/js/editor.js
 
 const output = document.getElementById("output");
-const publishedEl = document.getElementById("published");
 
 const WORKER_BASE =
   "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
 
-const ITEMS_URL = `${WORKER_BASE}/items`;
 const BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest?q=`;
 const BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
 const BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
@@ -34,12 +32,6 @@ function setOutput(o) {
   output.textContent = typeof o === "string" ? o : JSON.stringify(o, null, 2);
 }
 
-function parseCommaList(s) {
-  const t = String(s ?? "").trim();
-  if (!t) return [];
-  return t.split(",").map((x) => x.trim()).filter(Boolean);
-}
-
 // -------------------------
 // BOOK SUGGESTIONS
 // -------------------------
@@ -64,11 +56,18 @@ async function autofillBookFacts(openLibraryId) {
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || "books_autofill_failed");
 
+  // Fill facts fields
   setValue("authors", data.authors);
   setValue("publishedYear", data.publishedYear);
   setValue("publisher", data.publisher);
   setValue("isbn", data.isbn);
   setValue("language", data.language);
+
+  // NEW: fill href with Wikipedia URL if empty
+  const currentHref = getValue("href");
+  if (!currentHref && typeof data.wikipediaUrl === "string" && data.wikipediaUrl.trim()) {
+    setValue("href", data.wikipediaUrl.trim());
+  }
 
   lastAutofillPayload = {
     title: data.title,
@@ -78,11 +77,13 @@ async function autofillBookFacts(openLibraryId) {
     isbn: data.isbn || "",
     language: data.language || "",
     subjects: Array.isArray(data.subjects) ? data.subjects : [],
+    wikipediaUrl: typeof data.wikipediaUrl === "string" ? data.wikipediaUrl : "",
   };
 
   setOutput({
     source: "books/autofill",
     filled: {
+      href: getValue("href"),
       authors: data.authors,
       publishedYear: data.publishedYear,
       publisher: data.publisher,
@@ -108,7 +109,6 @@ async function enrichBookSummaryAndTags(facts) {
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || "books_enrich_failed");
 
-  // Set only text fields
   if (typeof data.summary === "string" && data.summary.trim()) {
     setValue("summary", data.summary.trim());
   }
@@ -119,10 +119,7 @@ async function enrichBookSummaryAndTags(facts) {
 
   setOutput({
     source: "books/enrich",
-    filled: {
-      summary: data.summary,
-      tags: data.tags,
-    },
+    filled: { summary: data.summary, tags: data.tags },
   });
 
   return data;
@@ -175,7 +172,6 @@ $("title")?.addEventListener("change", async () => {
     setOutput("Autofill läuft… (facts)");
     const factsRes = await autofillBookFacts(match.openLibraryId);
 
-    // facts for enrich
     const facts = lastAutofillPayload || {
       title: factsRes.title,
       authors: factsRes.authors || [],
@@ -184,6 +180,7 @@ $("title")?.addEventListener("change", async () => {
       isbn: factsRes.isbn || "",
       language: factsRes.language || "",
       subjects: factsRes.subjects || [],
+      wikipediaUrl: factsRes.wikipediaUrl || "",
     };
 
     setOutput("Autofill läuft… (AI summary/tags)");
