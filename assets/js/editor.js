@@ -14,6 +14,9 @@ const ITEMS_URL = `${WORKER_BASE}/items`;
 // Autofill bleibt vorerst auf Netlify
 const AUTOFILL_URL = "/.netlify/functions/autofill";
 
+// NEW: cache for suggestion loading
+let cachedItemsForSuggestions = null;
+
 function $(id) {
   return document.getElementById(id);
 }
@@ -110,15 +113,17 @@ function buildItem() {
     if (birthYear != null) meta.birthYear = birthYear;
     if (deathYear != null) meta.deathYear = deathYear;
 
-    // Optional future fields (only if the corresponding inputs exist in admin.html)
-    // nationality, affiliations etc. can be added later without breaking anything.
-    // If inputs are not present, these will stay empty.
+    // Optional meta fields for people (only if inputs exist)
     const nat = $("nationality") ? parseCommaList(getValue("nationality")) : [];
     const aff = $("affiliations") ? parseCommaList(getValue("affiliations")) : [];
     const fields = $("fields") ? parseCommaList(getValue("fields")) : [];
     const roles = $("roles") ? parseCommaList(getValue("roles")) : [];
-    const activeStartYear = $("activeStartYear") ? parseIntOrNull(getValue("activeStartYear")) : null;
-    const activeEndYear = $("activeEndYear") ? parseIntOrNull(getValue("activeEndYear")) : null;
+    const activeStartYear = $("activeStartYear")
+      ? parseIntOrNull(getValue("activeStartYear"))
+      : null;
+    const activeEndYear = $("activeEndYear")
+      ? parseIntOrNull(getValue("activeEndYear"))
+      : null;
 
     if (nat.length) meta.nationality = nat;
     if (aff.length) meta.affiliations = aff;
@@ -130,24 +135,24 @@ function buildItem() {
     item.meta = Object.keys(meta).length ? meta : null;
   }
 
-// NEW: books specific fields go into meta
-if (item.type === "books") {
-  const meta = {};
+  // NEW: books specific fields go into meta
+  if (item.type === "books") {
+    const meta = {};
 
-  const authors = $("authors") ? parseCommaList(getValue("authors")) : [];
-  const publishedYear = parseIntOrNull(getValue("publishedYear"));
-  const publisher = getValue("publisher");
-  const isbn = getValue("isbn");
-  const language = getValue("language");
+    const authors = $("authors") ? parseCommaList(getValue("authors")) : [];
+    const publishedYear = parseIntOrNull(getValue("publishedYear"));
+    const publisher = getValue("publisher");
+    const isbn = getValue("isbn");
+    const language = getValue("language");
 
-  if (authors.length) meta.authors = authors;
-  if (publishedYear != null) meta.publishedYear = publishedYear;
-  if (publisher) meta.publisher = publisher;
-  if (isbn) meta.isbn = isbn;
-  if (language) meta.language = language;
+    if (authors.length) meta.authors = authors;
+    if (publishedYear != null) meta.publishedYear = publishedYear;
+    if (publisher) meta.publisher = publisher;
+    if (isbn) meta.isbn = isbn;
+    if (language) meta.language = language;
 
-  item.meta = Object.keys(meta).length ? meta : null;
-}
+    item.meta = Object.keys(meta).length ? meta : null;
+  }
 
   return item;
 }
@@ -223,6 +228,27 @@ async function uploadImageToR2() {
 }
 
 // -------------------------
+// SUGGESTIONS (books title)
+// -------------------------
+async function loadBookTitleSuggestions() {
+  if (cachedItemsForSuggestions) return cachedItemsForSuggestions;
+
+  const res = await fetch(ITEMS_URL, { cache: "no-store" });
+  const data = await res.json();
+
+  if (!data || !Array.isArray(data.items)) {
+    cachedItemsForSuggestions = [];
+    return cachedItemsForSuggestions;
+  }
+
+  cachedItemsForSuggestions = data.items.filter(
+    (it) => it.type === "books" && typeof it.title === "string"
+  );
+
+  return cachedItemsForSuggestions;
+}
+
+// -------------------------
 // AI AUTOFILL (preview only)
 // -------------------------
 async function autofillFromAI() {
@@ -272,12 +298,14 @@ async function autofillFromAI() {
     return;
   }
 
+  // base fields
   setValue("href", data.href);
   setValue("summary", data.summary);
   setValue("tags", data.tags);
 
-  // People-specific years
   const currentType = getValue("type");
+
+  // People years
   if (currentType === "people") {
     if (data.birthYear != null && typeof data.birthYear === "number") {
       setValue("birthYear", String(data.birthYear));
@@ -293,6 +321,21 @@ async function autofillFromAI() {
   } else {
     setValue("birthYear", "");
     setValue("deathYear", "");
+  }
+
+  // Books fields (if autofill returns them)
+  if (currentType === "books") {
+    if ($("authors")) setValue("authors", Array.isArray(data.authors) ? data.authors : data.meta?.authors ?? []);
+    if ($("publishedYear")) setValue("publishedYear", data.publishedYear ?? data.meta?.publishedYear ?? "");
+    if ($("publisher")) setValue("publisher", data.publisher ?? data.meta?.publisher ?? "");
+    if ($("isbn")) setValue("isbn", data.isbn ?? data.meta?.isbn ?? "");
+    if ($("language")) setValue("language", data.language ?? data.meta?.language ?? "");
+  } else {
+    if ($("authors")) setValue("authors", "");
+    if ($("publishedYear")) setValue("publishedYear", "");
+    if ($("publisher")) setValue("publisher", "");
+    if ($("isbn")) setValue("isbn", "");
+    if ($("language")) setValue("language", "");
   }
 
   setOutput(JSON.stringify(buildItem(), null, 2));
@@ -450,58 +493,79 @@ async function loadPublished() {
         const tags = normalizeTags(it.tags);
         setValue("tags", tags);
 
-        // People years: prefer meta, fallback to legacy columns
-// ---------- TYPE-SPECIFIC FIELDS ----------
-if (it.type === "people") {
-  // people fields
-  const by =
-    it?.meta?.birthYear != null
-      ? it.meta.birthYear
-      : it.birthYear != null
-      ? it.birthYear
-      : "";
+        // ---------- TYPE-SPECIFIC FIELDS ----------
+        if (it.type === "people") {
+          const by =
+            it?.meta?.birthYear != null
+              ? it.meta.birthYear
+              : it.birthYear != null
+              ? it.birthYear
+              : "";
 
-  const dy =
-    it?.meta?.deathYear != null
-      ? it.meta.deathYear
-      : it.deathYear != null
-      ? it.deathYear
-      : "";
+          const dy =
+            it?.meta?.deathYear != null
+              ? it.meta.deathYear
+              : it.deathYear != null
+              ? it.deathYear
+              : "";
 
-  setValue("birthYear", by !== "" ? String(by) : "");
-  setValue("deathYear", dy !== "" ? String(dy) : "");
+          setValue("birthYear", by !== "" ? String(by) : "");
+          setValue("deathYear", dy !== "" ? String(dy) : "");
 
-  // clear book fields
-  if ($("authors")) setValue("authors", "");
-  if ($("publishedYear")) setValue("publishedYear", "");
-  if ($("publisher")) setValue("publisher", "");
-  if ($("isbn")) setValue("isbn", "");
-  if ($("language")) setValue("language", "");
+          // optional people meta
+          if ($("nationality")) setValue("nationality", it?.meta?.nationality ?? []);
+          if ($("affiliations")) setValue("affiliations", it?.meta?.affiliations ?? []);
+          if ($("fields")) setValue("fields", it?.meta?.fields ?? []);
+          if ($("roles")) setValue("roles", it?.meta?.roles ?? []);
+          if ($("activeStartYear")) setValue("activeStartYear", it?.meta?.activeStartYear ?? "");
+          if ($("activeEndYear")) setValue("activeEndYear", it?.meta?.activeEndYear ?? "");
 
-} else if (it.type === "books") {
-  // book fields
-  if ($("authors")) setValue("authors", it?.meta?.authors ?? []);
-  if ($("publishedYear")) setValue("publishedYear", it?.meta?.publishedYear ?? "");
-  if ($("publisher")) setValue("publisher", it?.meta?.publisher ?? "");
-  if ($("isbn")) setValue("isbn", it?.meta?.isbn ?? "");
-  if ($("language")) setValue("language", it?.meta?.language ?? "");
+          // clear book fields
+          if ($("authors")) setValue("authors", "");
+          if ($("publishedYear")) setValue("publishedYear", "");
+          if ($("publisher")) setValue("publisher", "");
+          if ($("isbn")) setValue("isbn", "");
+          if ($("language")) setValue("language", "");
 
-  // clear people fields
-  setValue("birthYear", "");
-  setValue("deathYear", "");
+        } else if (it.type === "books") {
+          // book fields
+          if ($("authors")) setValue("authors", it?.meta?.authors ?? []);
+          if ($("publishedYear")) setValue("publishedYear", it?.meta?.publishedYear ?? "");
+          if ($("publisher")) setValue("publisher", it?.meta?.publisher ?? "");
+          if ($("isbn")) setValue("isbn", it?.meta?.isbn ?? "");
+          if ($("language")) setValue("language", it?.meta?.language ?? "");
 
-} else {
-  // clear ALL type-specific fields
-  setValue("birthYear", "");
-  setValue("deathYear", "");
+          // clear people fields
+          setValue("birthYear", "");
+          setValue("deathYear", "");
 
-  if ($("authors")) setValue("authors", "");
-  if ($("publishedYear")) setValue("publishedYear", "");
-  if ($("publisher")) setValue("publisher", "");
-  if ($("isbn")) setValue("isbn", "");
-  if ($("language")) setValue("language", "");
-}
-setOutput(JSON.stringify(buildItem(), null, 2));
+          if ($("nationality")) setValue("nationality", "");
+          if ($("affiliations")) setValue("affiliations", "");
+          if ($("fields")) setValue("fields", "");
+          if ($("roles")) setValue("roles", "");
+          if ($("activeStartYear")) setValue("activeStartYear", "");
+          if ($("activeEndYear")) setValue("activeEndYear", "");
+
+        } else {
+          // clear ALL type-specific fields
+          setValue("birthYear", "");
+          setValue("deathYear", "");
+
+          if ($("nationality")) setValue("nationality", "");
+          if ($("affiliations")) setValue("affiliations", "");
+          if ($("fields")) setValue("fields", "");
+          if ($("roles")) setValue("roles", "");
+          if ($("activeStartYear")) setValue("activeStartYear", "");
+          if ($("activeEndYear")) setValue("activeEndYear", "");
+
+          if ($("authors")) setValue("authors", "");
+          if ($("publishedYear")) setValue("publishedYear", "");
+          if ($("publisher")) setValue("publisher", "");
+          if ($("isbn")) setValue("isbn", "");
+          if ($("language")) setValue("language", "");
+        }
+
+        setOutput(JSON.stringify(buildItem(), null, 2));
       } catch (e) {
         console.error(e);
       }
@@ -537,6 +601,9 @@ setOutput(JSON.stringify(buildItem(), null, 2));
         alert("Delete failed: " + t);
         return;
       }
+
+      // reset suggestion cache to include deletions
+      cachedItemsForSuggestions = null;
 
       await loadPublished();
     });
@@ -579,7 +646,7 @@ $("refreshList")?.addEventListener("click", () => {
   loadPublished().catch(console.error);
 });
 
-// Show/hide people fields based on type
+// Show/hide fields based on type
 $("type")?.addEventListener("change", () => {
   const personFields = $("personFields");
   const bookFields = $("bookFields");
@@ -593,11 +660,40 @@ $("type")?.addEventListener("change", () => {
   }
 });
 
+// NEW: suggestions on typing book titles
+$("title")?.addEventListener("input", async () => {
+  if (getValue("type") !== "books") return;
+
+  const q = getValue("title").toLowerCase();
+  const list = document.getElementById("titleSuggestions");
+  if (!list) return;
+
+  list.innerHTML = "";
+  if (!q || q.length < 2) return;
+
+  const items = await loadBookTitleSuggestions();
+
+  items
+    .filter((it) => it.title.toLowerCase().includes(q))
+    .slice(0, 10)
+    .forEach((it) => {
+      const opt = document.createElement("option");
+      opt.value = it.title;
+      list.appendChild(opt);
+    });
+});
+
 // initial
 loadPublished().catch(console.error);
 
-// Show/hide people fields on page load
-const personFields = document.getElementById("personFields");
+// Show/hide on page load
+const personFields = $("personFields");
+const bookFields = $("bookFields");
+
 if (personFields) {
   personFields.style.display = getValue("type") === "people" ? "block" : "none";
+}
+
+if (bookFields) {
+  bookFields.style.display = getValue("type") === "books" ? "block" : "none";
 }
