@@ -9,9 +9,11 @@ const WORKER_BASE =
 const ITEMS_URL = `${WORKER_BASE}/items`;
 const BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest?q=`;
 const BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
+const BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
 
 let latestBookSuggestions = [];
 let lastQuery = "";
+let lastAutofillPayload = null;
 
 function $(id) {
   return document.getElementById(id);
@@ -29,23 +31,30 @@ function setValue(id, value) {
 }
 
 function setOutput(o) {
-  output.textContent =
-    typeof o === "string" ? o : JSON.stringify(o, null, 2);
+  output.textContent = typeof o === "string" ? o : JSON.stringify(o, null, 2);
+}
+
+function parseCommaList(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return [];
+  return t.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
 // -------------------------
 // BOOK SUGGESTIONS
 // -------------------------
 async function fetchBookSuggestions(q) {
-  const res = await fetch(`${BOOK_SUGGEST_URL}${encodeURIComponent(q)}`);
+  const res = await fetch(`${BOOK_SUGGEST_URL}${encodeURIComponent(q)}`, {
+    cache: "no-store",
+  });
   const data = await res.json();
   return Array.isArray(data.suggestions) ? data.suggestions : [];
 }
 
 // -------------------------
-// BOOK AUTOFILL
+// BOOK AUTOFILL (facts)
 // -------------------------
-async function autofillBook(openLibraryId) {
+async function autofillBookFacts(openLibraryId) {
   const res = await fetch(BOOK_AUTOFILL_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -53,14 +62,23 @@ async function autofillBook(openLibraryId) {
   });
 
   const data = await res.json();
-  if (!data.ok) throw new Error("Autofill failed");
+  if (!data.ok) throw new Error(data.error || "books_autofill_failed");
 
-  // Fill fields
   setValue("authors", data.authors);
   setValue("publishedYear", data.publishedYear);
   setValue("publisher", data.publisher);
   setValue("isbn", data.isbn);
   setValue("language", data.language);
+
+  lastAutofillPayload = {
+    title: data.title,
+    authors: Array.isArray(data.authors) ? data.authors : [],
+    publishedYear: typeof data.publishedYear === "number" ? data.publishedYear : null,
+    publisher: data.publisher || "",
+    isbn: data.isbn || "",
+    language: data.language || "",
+    subjects: Array.isArray(data.subjects) ? data.subjects : [],
+  };
 
   setOutput({
     source: "books/autofill",
@@ -71,7 +89,43 @@ async function autofillBook(openLibraryId) {
       isbn: data.isbn,
       language: data.language,
     },
+    next: "books/enrich",
   });
+
+  return data;
+}
+
+// -------------------------
+// BOOK ENRICH (AI text)
+// -------------------------
+async function enrichBookSummaryAndTags(facts) {
+  const res = await fetch(BOOK_ENRICH_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(facts),
+  });
+
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || "books_enrich_failed");
+
+  // Set only text fields
+  if (typeof data.summary === "string" && data.summary.trim()) {
+    setValue("summary", data.summary.trim());
+  }
+
+  if (Array.isArray(data.tags) && data.tags.length) {
+    setValue("tags", data.tags.map(String));
+  }
+
+  setOutput({
+    source: "books/enrich",
+    filled: {
+      summary: data.summary,
+      tags: data.tags,
+    },
+  });
+
+  return data;
 }
 
 // -------------------------
@@ -82,9 +136,12 @@ $("title")?.addEventListener("input", async () => {
 
   const q = getValue("title");
   const list = $("titleSuggestions");
-  list.innerHTML = "";
+  if (!list) return;
 
-  if (q.length < 2 || q === lastQuery) return;
+  list.innerHTML = "";
+  if (q.length < 2) return;
+
+  if (q === lastQuery) return;
   lastQuery = q;
 
   latestBookSuggestions = await fetchBookSuggestions(q);
@@ -97,14 +154,14 @@ $("title")?.addEventListener("input", async () => {
 });
 
 // -------------------------
-// TITLE CHANGE → AUTOFILL
+// TITLE CHANGE → AUTOFILL + ENRICH
 // -------------------------
 $("title")?.addEventListener("change", async () => {
   if (getValue("type") !== "books") return;
 
   const title = getValue("title");
   const match = latestBookSuggestions.find(
-    (s) => s.title.toLowerCase() === title.toLowerCase()
+    (s) => String(s.title || "").toLowerCase() === title.toLowerCase()
   );
 
   if (!match) return;
@@ -115,9 +172,24 @@ $("title")?.addEventListener("change", async () => {
   }
 
   try {
-    await autofillBook(match.openLibraryId);
+    setOutput("Autofill läuft… (facts)");
+    const factsRes = await autofillBookFacts(match.openLibraryId);
+
+    // facts for enrich
+    const facts = lastAutofillPayload || {
+      title: factsRes.title,
+      authors: factsRes.authors || [],
+      publishedYear: factsRes.publishedYear ?? null,
+      publisher: factsRes.publisher || "",
+      isbn: factsRes.isbn || "",
+      language: factsRes.language || "",
+      subjects: factsRes.subjects || [],
+    };
+
+    setOutput("Autofill läuft… (AI summary/tags)");
+    await enrichBookSummaryAndTags(facts);
   } catch (e) {
-    setOutput("Autofill Fehler: " + e.message);
+    setOutput("Autofill Fehler: " + (e?.message || String(e)));
   }
 });
 
@@ -125,10 +197,10 @@ $("title")?.addEventListener("change", async () => {
 // TYPE VISIBILITY
 // -------------------------
 $("type")?.addEventListener("change", () => {
-  $("bookFields").style.display =
-    getValue("type") === "books" ? "block" : "none";
+  const bookFields = $("bookFields");
+  if (bookFields) bookFields.style.display = getValue("type") === "books" ? "block" : "none";
 });
 
 // Initial
-$("bookFields").style.display =
-  getValue("type") === "books" ? "block" : "none";
+const bookFields = $("bookFields");
+if (bookFields) bookFields.style.display = getValue("type") === "books" ? "block" : "none";
