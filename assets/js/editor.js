@@ -1,20 +1,34 @@
 // assets/js/editor.js
 
 const output = document.getElementById("output");
+const publishedEl = document.getElementById("published");
 
 const WORKER_BASE =
   "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
+
+const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
+const ITEMS_URL = `${WORKER_BASE}/items`;
 
 const BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest?q=`;
 const BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
 const BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
 
 let latestBookSuggestions = [];
-let lastQuery = "";
-let lastAutofillPayload = null;
+let lastBookQuery = "";
+let lastBookFacts = null;
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  }[m]));
 }
 
 function getValue(id) {
@@ -28,139 +42,476 @@ function setValue(id, value) {
   else el.value = value ?? "";
 }
 
-function setOutput(o) {
-  output.textContent = typeof o === "string" ? o : JSON.stringify(o, null, 2);
+function setOutput(textOrObj) {
+  if (!output) return;
+  output.textContent =
+    typeof textOrObj === "string"
+      ? textOrObj
+      : JSON.stringify(textOrObj, null, 2);
+}
+
+async function safeReadJson(res) {
+  const text = await res.text();
+  try {
+    return { ok: true, json: JSON.parse(text), raw: text };
+  } catch {
+    return { ok: false, raw: text };
+  }
+}
+
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags.map(String).filter(Boolean);
+  if (typeof tags === "string") {
+    const t = tags.trim();
+    if (!t) return [];
+    try {
+      const parsed = JSON.parse(t);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {}
+    return t.split(",").map((x) => x.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function parseCommaList(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return [];
+  return t.split(",").map((x) => x.trim()).filter(Boolean);
+}
+
+function parseIntOrNull(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
+  const n = parseInt(t, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function requireAdminToken(actionLabel) {
+  const token = prompt(`Admin token (x-admin-token) für ${actionLabel}:`);
+  return token && token.trim() ? token.trim() : null;
 }
 
 // -------------------------
-// BOOK SUGGESTIONS
+// Build item payload (with meta)
+// -------------------------
+function buildItem() {
+  const type = getValue("type"); // expects: person, project, org, topic, concept, book, movie
+  const tags = parseCommaList(getValue("tags"));
+
+  const item = {
+    type,
+    title: getValue("title"),
+    href: getValue("href"),
+    imageUrl: getValue("imageUrl"),
+    summary: getValue("summary"),
+    tags,
+    meta: null,
+  };
+
+  // PERSON meta (if your admin.html has these fields; optional)
+  if (type === "person") {
+    const meta = {};
+    const birthYear = parseIntOrNull(getValue("birthYear"));
+    const deathYear = parseIntOrNull(getValue("deathYear"));
+    if (birthYear != null) meta.birthYear = birthYear;
+    if (deathYear != null) meta.deathYear = deathYear;
+    item.meta = Object.keys(meta).length ? meta : null;
+  }
+
+  // BOOK meta (if bookFields exist; optional)
+  if (type === "book") {
+    const meta = {};
+    if ($("authors")) {
+      const authors = parseCommaList(getValue("authors"));
+      if (authors.length) meta.authors = authors;
+    }
+    if ($("publishedYear")) {
+      const y = parseIntOrNull(getValue("publishedYear"));
+      if (y != null) meta.publishedYear = y;
+    }
+    if ($("publisher")) {
+      const publisher = getValue("publisher");
+      if (publisher) meta.publisher = publisher;
+    }
+    if ($("isbn")) {
+      const isbn = getValue("isbn");
+      if (isbn) meta.isbn = isbn;
+    }
+    if ($("language")) {
+      const language = getValue("language");
+      if (language) meta.language = language;
+    }
+
+    // store these if we have them from worker
+    if (lastBookFacts?.openLibraryId) meta.openLibraryId = lastBookFacts.openLibraryId;
+    if (lastBookFacts?.wikipediaUrl) meta.wikipediaUrl = lastBookFacts.wikipediaUrl;
+
+    item.meta = Object.keys(meta).length ? meta : null;
+  }
+
+  return item;
+}
+
+// -------------------------
+// Upload image (R2 via Worker)
+// -------------------------
+async function uploadImageToR2() {
+  const fileInput = $("imageFile");
+  const urlInput = $("imageUrl");
+
+  if (!fileInput) return setOutput('Fehler: <input id="imageFile"> nicht gefunden.');
+
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) return setOutput("Bitte zuerst eine Bilddatei auswählen.");
+
+  const token = requireAdminToken("Upload");
+  if (!token) return setOutput("Upload abgebrochen (kein Token).");
+
+  const btn = $("uploadImage");
+  if (btn) btn.disabled = true;
+
+  try {
+    setOutput(`Uploading…\nPOST ${UPLOAD_URL}`);
+
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+
+    const res = await fetch(UPLOAD_URL, {
+      method: "POST",
+      headers: { "x-admin-token": token },
+      body: fd,
+    });
+
+    const parsed = await safeReadJson(res);
+    if (!res.ok) {
+      return setOutput(
+        `Upload-Fehler (HTTP ${res.status}):\n` +
+          (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+      );
+    }
+
+    const data = parsed.ok ? parsed.json : null;
+    if (!data?.imageUrl) return setOutput("Upload ok, aber keine imageUrl in Antwort.");
+
+    if (urlInput) urlInput.value = data.imageUrl;
+    setOutput({ ok: true, upload: data });
+  } catch (e) {
+    setOutput("Upload Fehler:\n" + (e?.message || e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// -------------------------
+// Publish (POST /items)
+// -------------------------
+async function publishItem() {
+  const token = requireAdminToken("Publish");
+  if (!token) return setOutput("Publish abgebrochen (kein Token).");
+
+  const item = buildItem();
+
+  // Minimal validation
+  if (!item.type) return setOutput("Fehler: type fehlt.");
+  if (!item.title) return setOutput("Fehler: title fehlt.");
+
+  setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
+
+  let res;
+  try {
+    res = await fetch(ITEMS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": token,
+      },
+      body: JSON.stringify(item),
+    });
+  } catch (e) {
+    return setOutput("Publish Fehler: Failed to fetch\n" + (e?.message || e));
+  }
+
+  const parsed = await safeReadJson(res);
+  if (!res.ok) {
+    return setOutput(
+      `Publish-Fehler (HTTP ${res.status}):\n` +
+        (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+    );
+  }
+
+  setOutput({ ok: true, published: parsed.json });
+  alert("Item veröffentlicht ✔");
+
+  // reset suggestion cache because exists flags may change
+  latestBookSuggestions = [];
+  lastBookQuery = "";
+
+  await loadPublished();
+}
+
+// -------------------------
+// List + Load + Delete
+// -------------------------
+async function loadPublished() {
+  if (!publishedEl) return;
+
+  publishedEl.textContent = `Loading…\nGET ${ITEMS_URL}`;
+
+  let res;
+  try {
+    res = await fetch(ITEMS_URL, { cache: "no-store" });
+  } catch (e) {
+    publishedEl.innerHTML =
+      `<pre class="code" style="white-space:pre-wrap;">` +
+      escapeHtml("Netzwerkfehler (list): Failed to fetch\n" + (e?.message || e)) +
+      `</pre>`;
+    return;
+  }
+
+  const parsed = await safeReadJson(res);
+  if (!res.ok) {
+    publishedEl.innerHTML =
+      `<pre class="code" style="white-space:pre-wrap;">` +
+      escapeHtml(
+        `List-Fehler (HTTP ${res.status}):\n` +
+          (parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw)
+      ) +
+      `</pre>`;
+    return;
+  }
+
+  const items = Array.isArray(parsed?.json?.items) ? parsed.json.items : [];
+  if (!items.length) {
+    publishedEl.textContent = "No published items yet.";
+    return;
+  }
+
+  publishedEl.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      ${items
+        .map((it) => {
+          const title = escapeHtml(it.title || "");
+          const type = escapeHtml(it.type || "");
+          const createdAt = escapeHtml(it.createdAt || "");
+          const id = escapeHtml(it.id || "");
+
+          return `
+            <div style="display:flex; align-items:center; gap:10px; justify-content:space-between; border:1px solid rgba(255,255,255,0.08); padding:10px; border-radius:14px;">
+              <div style="min-width:0;">
+                <div style="opacity:0.7; font-size:12px;">${type} · ${createdAt}</div>
+                <div style="font-weight:700; letter-spacing:0.04em;">${title}</div>
+                <div style="opacity:0.6; font-size:12px; word-break:break-all;">${id}</div>
+              </div>
+              <div style="display:flex; gap:8px; flex-shrink:0;">
+                <button class="btn btn--ghost" data-load='${escapeHtml(
+                  JSON.stringify(it)
+                ).replace(/'/g, "&#039;")}'>Load</button>
+                <button class="btn" data-del-id="${id}">Delete</button>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+
+  // Load into form
+  publishedEl.querySelectorAll("button[data-load]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      try {
+        const it = JSON.parse(btn.getAttribute("data-load"));
+
+        setValue("type", it.type);
+        setValue("title", it.title);
+        setValue("href", it.href);
+        setValue("imageUrl", it.imageUrl || "");
+        setValue("summary", it.summary);
+        setValue("tags", normalizeTags(it.tags));
+
+        // Person fields
+        if (it.type === "person") {
+          setValue("birthYear", it?.meta?.birthYear ?? "");
+          setValue("deathYear", it?.meta?.deathYear ?? "");
+        } else {
+          setValue("birthYear", "");
+          setValue("deathYear", "");
+        }
+
+        // Book fields
+        if (it.type === "book") {
+          if ($("authors")) setValue("authors", it?.meta?.authors ?? []);
+          if ($("publishedYear")) setValue("publishedYear", it?.meta?.publishedYear ?? "");
+          if ($("publisher")) setValue("publisher", it?.meta?.publisher ?? "");
+          if ($("isbn")) setValue("isbn", it?.meta?.isbn ?? "");
+          if ($("language")) setValue("language", it?.meta?.language ?? "");
+        } else {
+          if ($("authors")) setValue("authors", "");
+          if ($("publishedYear")) setValue("publishedYear", "");
+          if ($("publisher")) setValue("publisher", "");
+          if ($("isbn")) setValue("isbn", "");
+          if ($("language")) setValue("language", "");
+        }
+
+        setOutput(buildItem());
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  });
+
+  // Delete
+  publishedEl.querySelectorAll("button[data-del-id]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-del-id");
+      if (!id) return;
+      if (!confirm("Delete this item?")) return;
+
+      const token = requireAdminToken("Delete");
+      if (!token) return alert("Delete abgebrochen (kein Token).");
+
+      let delRes;
+      try {
+        delRes = await fetch(`${ITEMS_URL}?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          headers: { "x-admin-token": token },
+        });
+      } catch (e) {
+        return alert("Delete failed: Failed to fetch\n" + (e?.message || e));
+      }
+
+      if (!delRes.ok) {
+        const t = await delRes.text();
+        return alert("Delete failed: " + t);
+      }
+
+      latestBookSuggestions = [];
+      lastBookQuery = "";
+      await loadPublished();
+    });
+  });
+}
+
+// -------------------------
+// Books: suggest + autofill + enrich + wikipedia href
 // -------------------------
 async function fetchBookSuggestions(q) {
-  const res = await fetch(`${BOOK_SUGGEST_URL}${encodeURIComponent(q)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(`${BOOK_SUGGEST_URL}${encodeURIComponent(q)}`, { cache: "no-store" });
   const data = await res.json();
-  return Array.isArray(data.suggestions) ? data.suggestions : [];
+  return Array.isArray(data?.suggestions) ? data.suggestions : [];
 }
 
-// -------------------------
-// BOOK AUTOFILL (facts)
-// -------------------------
-async function autofillBookFacts(openLibraryId) {
+async function booksAutofillFacts(openLibraryId) {
   const res = await fetch(BOOK_AUTOFILL_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ openLibraryId }),
   });
-
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || "books_autofill_failed");
 
-  // Fill facts fields
-  setValue("authors", data.authors);
-  setValue("publishedYear", data.publishedYear);
-  setValue("publisher", data.publisher);
-  setValue("isbn", data.isbn);
-  setValue("language", data.language);
+  // Fill fields
+  if ($("authors")) setValue("authors", data.authors || []);
+  if ($("publishedYear")) setValue("publishedYear", data.publishedYear ?? "");
+  if ($("publisher")) setValue("publisher", data.publisher || "");
+  if ($("isbn")) setValue("isbn", data.isbn || "");
+  if ($("language")) setValue("language", data.language || "");
 
-  // NEW: fill href with Wikipedia URL if empty
-  const currentHref = getValue("href");
-  if (!currentHref && typeof data.wikipediaUrl === "string" && data.wikipediaUrl.trim()) {
-    setValue("href", data.wikipediaUrl.trim());
-  }
+  // Set href from wikipediaUrl if href empty
+  if (!getValue("href") && data.wikipediaUrl) setValue("href", data.wikipediaUrl);
 
-  lastAutofillPayload = {
-    title: data.title,
+  lastBookFacts = {
+    openLibraryId: data.openLibraryId,
+    wikipediaUrl: data.wikipediaUrl || "",
+    title: data.title || "",
     authors: Array.isArray(data.authors) ? data.authors : [],
     publishedYear: typeof data.publishedYear === "number" ? data.publishedYear : null,
     publisher: data.publisher || "",
     isbn: data.isbn || "",
     language: data.language || "",
     subjects: Array.isArray(data.subjects) ? data.subjects : [],
-    wikipediaUrl: typeof data.wikipediaUrl === "string" ? data.wikipediaUrl : "",
   };
 
-  setOutput({
-    source: "books/autofill",
-    filled: {
-      href: getValue("href"),
-      authors: data.authors,
-      publishedYear: data.publishedYear,
-      publisher: data.publisher,
-      isbn: data.isbn,
-      language: data.language,
-    },
-    next: "books/enrich",
-  });
-
-  return data;
+  return lastBookFacts;
 }
 
-// -------------------------
-// BOOK ENRICH (AI text)
-// -------------------------
-async function enrichBookSummaryAndTags(facts) {
+async function booksEnrichSummaryTags(facts) {
   const res = await fetch(BOOK_ENRICH_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(facts),
+    body: JSON.stringify({
+      title: facts.title,
+      authors: facts.authors,
+      publishedYear: facts.publishedYear,
+      publisher: facts.publisher,
+      isbn: facts.isbn,
+      language: facts.language,
+      subjects: facts.subjects,
+    }),
   });
 
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || "books_enrich_failed");
 
-  if (typeof data.summary === "string" && data.summary.trim()) {
-    setValue("summary", data.summary.trim());
-  }
-
-  if (Array.isArray(data.tags) && data.tags.length) {
-    setValue("tags", data.tags.map(String));
-  }
-
-  setOutput({
-    source: "books/enrich",
-    filled: { summary: data.summary, tags: data.tags },
-  });
+  if (data.summary) setValue("summary", data.summary);
+  if (Array.isArray(data.tags)) setValue("tags", data.tags);
 
   return data;
 }
 
 // -------------------------
-// TITLE INPUT → SUGGEST
+// UI wiring
 // -------------------------
+$("generate")?.addEventListener("click", () => setOutput(buildItem()));
+$("publish")?.addEventListener("click", () => publishItem().catch((e) => setOutput(e?.message || e)));
+$("refreshList")?.addEventListener("click", () => loadPublished().catch(console.error));
+$("uploadImage")?.addEventListener("click", () => uploadImageToR2().catch(console.error));
+
+// show/hide person fields based on type
+$("type")?.addEventListener("change", () => {
+  const personFields = $("personFields");
+  const bookFields = $("bookFields");
+
+  if (personFields) personFields.style.display = getValue("type") === "person" ? "block" : "none";
+  if (bookFields) bookFields.style.display = getValue("type") === "book" ? "block" : "none";
+});
+
+// Books: live suggestions
 $("title")?.addEventListener("input", async () => {
-  if (getValue("type") !== "books") return;
+  if (getValue("type") !== "book") return;
 
   const q = getValue("title");
-  const list = $("titleSuggestions");
+  const list = document.getElementById("titleSuggestions");
   if (!list) return;
 
   list.innerHTML = "";
-  if (q.length < 2) return;
+  if (!q || q.length < 2) return;
 
-  if (q === lastQuery) return;
-  lastQuery = q;
+  if (q.toLowerCase() === lastBookQuery.toLowerCase()) return;
+  lastBookQuery = q;
 
-  latestBookSuggestions = await fetchBookSuggestions(q);
+  try {
+    latestBookSuggestions = await fetchBookSuggestions(q);
+  } catch (e) {
+    setOutput("Suggest Fehler:\n" + (e?.message || e));
+    latestBookSuggestions = [];
+    return;
+  }
 
-  latestBookSuggestions.forEach((s) => {
+  latestBookSuggestions.slice(0, 10).forEach((s) => {
     const opt = document.createElement("option");
     opt.value = s.title;
     list.appendChild(opt);
   });
 });
 
-// -------------------------
-// TITLE CHANGE → AUTOFILL + ENRICH
-// -------------------------
+// Books: select title => autofill + enrich (only if not exists)
 $("title")?.addEventListener("change", async () => {
-  if (getValue("type") !== "books") return;
+  if (getValue("type") !== "book") return;
 
   const title = getValue("title");
   const match = latestBookSuggestions.find(
     (s) => String(s.title || "").toLowerCase() === title.toLowerCase()
   );
-
   if (!match) return;
 
   if (match.exists) {
@@ -170,34 +521,22 @@ $("title")?.addEventListener("change", async () => {
 
   try {
     setOutput("Autofill läuft… (facts)");
-    const factsRes = await autofillBookFacts(match.openLibraryId);
-
-    const facts = lastAutofillPayload || {
-      title: factsRes.title,
-      authors: factsRes.authors || [],
-      publishedYear: factsRes.publishedYear ?? null,
-      publisher: factsRes.publisher || "",
-      isbn: factsRes.isbn || "",
-      language: factsRes.language || "",
-      subjects: factsRes.subjects || [],
-      wikipediaUrl: factsRes.wikipediaUrl || "",
-    };
+    const facts = await booksAutofillFacts(match.openLibraryId);
 
     setOutput("Autofill läuft… (AI summary/tags)");
-    await enrichBookSummaryAndTags(facts);
+    await booksEnrichSummaryTags(facts);
+
+    setOutput(buildItem());
   } catch (e) {
-    setOutput("Autofill Fehler: " + (e?.message || String(e)));
+    setOutput("Autofill Fehler: " + (e?.message || e));
   }
 });
 
-// -------------------------
-// TYPE VISIBILITY
-// -------------------------
-$("type")?.addEventListener("change", () => {
-  const bookFields = $("bookFields");
-  if (bookFields) bookFields.style.display = getValue("type") === "books" ? "block" : "none";
-});
+// initial list
+loadPublished().catch(console.error);
 
-// Initial
-const bookFields = $("bookFields");
-if (bookFields) bookFields.style.display = getValue("type") === "books" ? "block" : "none";
+// initial visibility
+const pf = $("personFields");
+if (pf) pf.style.display = getValue("type") === "person" ? "block" : "none";
+const bf = $("bookFields");
+if (bf) bf.style.display = getValue("type") === "book" ? "block" : "none";
