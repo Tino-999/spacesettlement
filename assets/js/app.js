@@ -394,7 +394,7 @@ function createDust(canvas) {
 
   function step() {
     // Trail (increase last value for faster fade: 0.10 .. 0.14)
-    ctx.fillStyle = "rgba(0,0,0,0.09)";
+    ctx.fillStyle = "rgba(0,0,0,0)";
     ctx.fillRect(0, 0, cssW, cssH);
 
     ctx.globalCompositeOperation = "lighter";
