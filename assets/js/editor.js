@@ -22,6 +22,10 @@ let latestBookSuggestions = [];
 let lastBookQuery = "";
 let lastBookFacts = null;
 
+// Suggest race-control
+let suggestSeq = 0;
+let suggestDebounceTimer = null;
+
 // -------------------------
 // Helpers
 // -------------------------
@@ -32,6 +36,7 @@ const normalizeType = (t) => {
   return s;
 };
 const isBookType = () => normalizeType(getValue("type")) === "book";
+const isPersonType = () => normalizeType(getValue("type")) === "person";
 
 function getValue(id) {
   const el = $(id);
@@ -68,6 +73,36 @@ function requireAdminToken(actionLabel = "Aktion") {
   return token || "";
 }
 
+function setBusy(id, busy) {
+  const el = $(id);
+  if (!el) return;
+  el.disabled = !!busy;
+  el.style.opacity = busy ? "0.6" : "1";
+}
+
+function clearBookSuggestionsUI() {
+  const list = $("titleSuggestions");
+  if (list) list.innerHTML = "";
+  latestBookSuggestions = [];
+  lastBookQuery = "";
+}
+
+function toggleFieldsByType() {
+  const bookFields = $("bookFields");
+  const personFields = $("personFields");
+
+  const t = normalizeType(getValue("type"));
+
+  if (bookFields) bookFields.style.display = t === "book" ? "block" : "none";
+  if (personFields) personFields.style.display = t === "person" ? "block" : "none";
+
+  // If switching away from book: clear suggestion state
+  if (t !== "book") clearBookSuggestionsUI();
+}
+
+// -------------------------
+// Build item
+// -------------------------
 function buildItem() {
   const type = normalizeType(getValue("type"));
   const title = getValue("title");
@@ -108,6 +143,7 @@ function buildItem() {
 
     if (lastBookFacts?.openLibraryId) meta.openLibraryId = lastBookFacts.openLibraryId;
     if (lastBookFacts?.wikipediaUrl) meta.wikipediaUrl = lastBookFacts.wikipediaUrl;
+    if (lastBookFacts?.coverUrl) meta.coverUrl = lastBookFacts.coverUrl;
 
     item.meta = Object.keys(meta).length ? meta : null;
   }
@@ -116,7 +152,7 @@ function buildItem() {
 }
 
 // -------------------------
-// Upload image (optional; but now you usually won’t need it)
+// Upload image
 // -------------------------
 async function uploadImageToR2() {
   const fileInput = $("imageFile");
@@ -129,8 +165,7 @@ async function uploadImageToR2() {
   const token = requireAdminToken("Upload");
   if (!token) return setOutput("Upload abgebrochen (kein Token).");
 
-  const btn = $("uploadImage");
-  if (btn) btn.disabled = true;
+  setBusy("uploadImage", true);
 
   try {
     setOutput(`Uploading…\nPOST ${UPLOAD_URL}`);
@@ -159,7 +194,7 @@ async function uploadImageToR2() {
   } catch (e) {
     setOutput("Upload Fehler:\n" + (e?.message || e));
   } finally {
-    if (btn) btn.disabled = false;
+    setBusy("uploadImage", false);
   }
 }
 
@@ -174,6 +209,7 @@ async function publishItem() {
   if (!item.type) return setOutput("Fehler: type fehlt.");
   if (!item.title) return setOutput("Fehler: title fehlt.");
 
+  setBusy("publish", true);
   setOutput(`Publishing…\nPOST ${ITEMS_URL}`);
 
   let res;
@@ -187,10 +223,13 @@ async function publishItem() {
       body: JSON.stringify(item),
     });
   } catch (e) {
+    setBusy("publish", false);
     return setOutput("Publish Fehler: Failed to fetch\n" + (e?.message || e));
   }
 
   const parsed = await safeReadJson(res);
+  setBusy("publish", false);
+
   if (!res.ok) {
     return setOutput(
       "Publish Fehler (" +
@@ -299,39 +338,57 @@ function pickBestBookSuggestion(titleText) {
   return latestBookSuggestions[0];
 }
 
+async function ensureBookSuggestionsForTitle(title) {
+  const q = String(title || "").trim();
+  if (q.length < 2) return [];
+  // if we already have suggestions for this query, reuse
+  if (latestBookSuggestions.length && q.toLowerCase() === lastBookQuery.toLowerCase()) return latestBookSuggestions;
+
+  // fetch fresh
+  latestBookSuggestions = await fetchBookSuggestions(q);
+  lastBookQuery = q;
+  return latestBookSuggestions;
+}
+
 async function runBookAutofill() {
   if (!isBookType()) return;
 
   const title = getValue("title");
   if (!title || title.length < 2) return setOutput("Bitte einen Buchtitel eingeben.");
 
-  const match = pickBestBookSuggestion(title);
-  if (!match?.openLibraryId) return setOutput("Bitte einen Vorschlag auswählen (oder kurz warten, bis Vorschläge da sind).");
+  setBusy("autofill", true);
 
   try {
+    // IMPORTANT: if suggestions are empty (race), fetch now
+    await ensureBookSuggestionsForTitle(title);
+
+    const match = pickBestBookSuggestion(title);
+    if (!match?.openLibraryId) {
+      return setOutput("Kein OpenLibrary-Treffer. Tipp: anderen Titel / länger tippen.");
+    }
+
     setOutput("Autofill läuft… (facts)");
     const facts = await booksAutofillFacts(match.openLibraryId);
     lastBookFacts = facts;
 
-    // Always switch title/authors to ORIGINAL work title if mapping was used
+    // Title/authors: switch to ORIGINAL work title if mapping was used
     if (facts.title) setValue("title", facts.title);
     if (Array.isArray(facts.authors)) setValue("authors", facts.authors.join(", "));
 
-    // Concrete edition
+    // Edition fields
     if (facts.publishedYear) setValue("publishedYear", facts.publishedYear);
     if (facts.publisher) setValue("publisher", facts.publisher);
     if (facts.isbn) setValue("isbn", facts.isbn);
     if (facts.language) setValue("language", facts.language);
 
-    // Original first publish year (separately)
+    // Original
     if (facts.firstPublishYear) setValue("firstPublishYear", facts.firstPublishYear);
 
-    // Link to Wikipedia (best effort)
+    // Wikipedia link
     if (facts.wikipediaUrl) setValue("href", facts.wikipediaUrl);
 
-    // Cover auto (use OpenLibrary cover if present)
+    // Cover auto (worker should return coverUrl)
     if (facts.coverUrl) {
-      // only overwrite if empty OR looks like placeholder
       const cur = getValue("imageUrl");
       if (!cur || cur.includes("assets/img/") || cur.includes("...images/file")) {
         setValue("imageUrl", facts.coverUrl);
@@ -353,45 +410,89 @@ async function runBookAutofill() {
     setOutput(buildItem());
   } catch (e) {
     setOutput("Autofill Fehler: " + (e?.message || e));
+  } finally {
+    setBusy("autofill", false);
   }
 }
 
-// Live suggestions
-$("title")?.addEventListener("input", async () => {
+// Live suggestions (debounced + stale-safe)
+function scheduleBookSuggestFetch() {
   if (!isBookType()) return;
 
   const q = getValue("title");
   const list = $("titleSuggestions");
   if (!list) return;
 
+  if (suggestDebounceTimer) clearTimeout(suggestDebounceTimer);
+
+  // clear UI quickly
   list.innerHTML = "";
   latestBookSuggestions = [];
 
   if (!q || q.length < 2) return;
-  if (q.toLowerCase() === lastBookQuery.toLowerCase()) return;
-  lastBookQuery = q;
 
-  try {
-    latestBookSuggestions = await fetchBookSuggestions(q);
-  } catch (e) {
-    setOutput("Suggest Fehler:\n" + (e?.message || e));
-    latestBookSuggestions = [];
-    return;
-  }
+  const mySeq = ++suggestSeq;
 
-  latestBookSuggestions.slice(0, 12).forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.title;
-    list.appendChild(opt);
-  });
+  suggestDebounceTimer = setTimeout(async () => {
+    try {
+      const suggestions = await fetchBookSuggestions(q);
+
+      // stale response? ignore.
+      if (mySeq !== suggestSeq) return;
+
+      lastBookQuery = q;
+      latestBookSuggestions = suggestions;
+
+      list.innerHTML = "";
+      latestBookSuggestions.slice(0, 12).forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s.title;
+        list.appendChild(opt);
+      });
+    } catch (e) {
+      if (mySeq !== suggestSeq) return;
+      setOutput("Suggest Fehler:\n" + (e?.message || e));
+      latestBookSuggestions = [];
+    }
+  }, 200);
+}
+
+// -------------------------
+// Init + Events
+// -------------------------
+$("type")?.addEventListener("change", () => {
+  toggleFieldsByType();
+  setOutput(buildItem());
 });
 
-// Buttons
-$("generate")?.addEventListener("click", () => setOutput(buildItem()));
-$("publish")?.addEventListener("click", () => publishItem().catch((e) => setOutput(e?.message || e)));
-$("refreshList")?.addEventListener("click", () => loadPublished().catch(console.error));
-$("uploadImage")?.addEventListener("click", () => uploadImageToR2().catch(console.error));
-$("autofill")?.addEventListener("click", () => runBookAutofill());
+$("title")?.addEventListener("input", () => {
+  if (isBookType()) scheduleBookSuggestFetch();
+});
 
+// Optional: If you want auto-fill when user selects a datalist value:
+// $("title")?.addEventListener("change", () => { if (isBookType()) runBookAutofill(); });
+
+$("generate")?.addEventListener("click", (e) => {
+  e.preventDefault?.();
+  setOutput(buildItem());
+});
+$("publish")?.addEventListener("click", (e) => {
+  e.preventDefault?.();
+  publishItem().catch((err) => setOutput(err?.message || err));
+});
+$("refreshList")?.addEventListener("click", (e) => {
+  e.preventDefault?.();
+  loadPublished().catch(console.error);
+});
+$("uploadImage")?.addEventListener("click", (e) => {
+  e.preventDefault?.();
+  uploadImageToR2().catch(console.error);
+});
+$("autofill")?.addEventListener("click", (e) => {
+  e.preventDefault?.();
+  runBookAutofill();
+});
+
+toggleFieldsByType();
 loadPublished().catch(console.error);
 setOutput(`Editor loaded.\nAPI: ${WORKER_BASE}`);
