@@ -169,8 +169,6 @@ function passesFilter(item, q, filter) {
     item.href,
     ...(Array.isArray(item.tags) ? item.tags : []),
     item.type,
-
-    // include meta values for search (strings + numbers + arrays)
     meta ? JSON.stringify(meta) : "",
   ]
     .map(normalizeText)
@@ -220,9 +218,7 @@ function sortItemsByYear(items) {
     const ay = typeof a.sortYear === "number" ? a.sortYear : null;
     const by = typeof b.sortYear === "number" ? b.sortYear : null;
 
-    if (ay != null && by != null && ay !== by) {
-      return by - ay; // DESC
-    }
+    if (ay != null && by != null && ay !== by) return by - ay; // DESC
     if (ay != null && by == null) return -1;
     if (ay == null && by != null) return 1;
 
@@ -230,6 +226,70 @@ function sortItemsByYear(items) {
     const bt = String(b.title || "").toLowerCase();
     return at.localeCompare(bt);
   });
+}
+
+// --- NEW: media renderer (books get fixed cover + dust canvas) ---
+function renderMedia(type, imagePath, title) {
+  const t = String(type || "").toLowerCase();
+  const isBook = t === "book" || t === "books";
+
+  if (!isBook) {
+    return `
+      <div class="card__media">
+        ${imagePath ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">` : ``}
+        <div class="card__fade" aria-hidden="true"></div>
+      </div>
+    `;
+  }
+
+  // Books: keep cover size stable + show dust on the right.
+  // No CSS changes: inline layout.
+  return `
+    <div class="card__media" style="display:flex; gap:18px; align-items:stretch;">
+      <div style="
+        flex:0 0 240px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:14px;
+        border-radius:16px;
+        overflow:hidden;
+        position:relative;
+      ">
+        ${
+          imagePath
+            ? `<img
+                src="${imagePath}"
+                alt="${title}"
+                loading="lazy"
+                style="
+                  width:100%;
+                  height:100%;
+                  object-fit:contain;
+                  display:block;
+                  border-radius:12px;
+                  filter: grayscale(1) contrast(1.05) brightness(.92);
+                "
+              >`
+            : ``
+        }
+      </div>
+
+      <canvas
+        data-dust="1"
+        aria-hidden="true"
+        style="
+          flex:1;
+          display:block;
+          width:100%;
+          height:100%;
+          border-radius:16px;
+        "
+      ></canvas>
+
+      <div class="card__fade" aria-hidden="true"></div>
+    </div>
+  `;
 }
 
 function render(items) {
@@ -269,14 +329,7 @@ function render(items) {
       return `
         <article class="card">
           <div class="card__row">
-            <div class="card__media">
-              ${
-                imagePath
-                  ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">`
-                  : ``
-              }
-              <div class="card__fade" aria-hidden="true"></div>
-            </div>
+            ${renderMedia(type, imagePath, title)}
 
             <div class="card__content">
               <div class="card__kicker">${escapeHtml(type)}</div>
@@ -304,6 +357,149 @@ function render(items) {
       `;
     })
     .join("");
+
+  // NEW: init dust canvases after DOM update
+  requestAnimationFrame(initDustCanvases);
+}
+
+// --- NEW: dust engine (per-canvas) ---
+const __dust = new WeakMap();
+
+function initDustCanvases() {
+  const canvases = Array.from(document.querySelectorAll('canvas[data-dust="1"]'));
+  for (const canvas of canvases) {
+    if (__dust.has(canvas)) continue;
+    __dust.set(canvas, createDust(canvas));
+  }
+}
+
+function createDust(canvas) {
+  const ctx = canvas.getContext("2d", { alpha: true });
+
+  const state = {
+    w: 0,
+    h: 0,
+    last: performance.now(),
+    seeds: [],
+    ro: null,
+    stop: false,
+  };
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+
+    state.w = Math.max(1, Math.floor(rect.width));
+    state.h = Math.max(1, Math.floor(rect.height));
+
+    canvas.width = Math.floor(state.w * dpr);
+    canvas.height = Math.floor(state.h * dpr);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    seed();
+    ctx.clearRect(0, 0, state.w, state.h);
+  }
+
+  function rand(n) {
+    const x = Math.sin(n) * 10000;
+    return x - Math.floor(x);
+  }
+
+  function seed() {
+    const count = Math.floor(Math.min(900, Math.max(260, (state.w * state.h) / 2600)));
+    state.seeds = new Array(count);
+    for (let i = 0; i < count; i++) {
+      state.seeds[i] = {
+        x: rand(i * 12.17) * state.w,
+        y: rand(i * 91.31) * state.h,
+        vx: 0,
+        vy: 0,
+        life: 0,
+        ttl: 220 + Math.floor(rand(i * 7.77) * 260),
+      };
+    }
+  }
+
+  function field(x, y, t) {
+    const nx = x / Math.max(1, state.w);
+    const ny = y / Math.max(1, state.h);
+
+    const a = Math.sin(t * 0.00018 + nx * 6.0) * 0.8;
+    const b = Math.cos(t * 0.00014 + ny * 5.0) * 0.8;
+
+    const ang = (a + b) * 1.1 + (nx - 0.5) * 0.6 - (ny - 0.5) * 0.4;
+    const mag = 0.9;
+
+    return { ax: Math.cos(ang) * mag, ay: Math.sin(ang) * mag };
+  }
+
+  function step(now) {
+    if (state.stop) return;
+
+    const dt = Math.min(32, now - state.last);
+    state.last = now;
+
+    // subtle trail
+    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    ctx.fillRect(0, 0, state.w, state.h);
+
+    ctx.lineWidth = 1;
+    ctx.globalCompositeOperation = "lighter";
+
+    for (let i = 0; i < state.seeds.length; i++) {
+      const p = state.seeds[i];
+      const px = p.x, py = p.y;
+
+      const f = field(p.x, p.y, now);
+
+      p.vx = p.vx * 0.94 + f.ax * 0.55;
+      p.vy = p.vy * 0.94 + f.ay * 0.55;
+
+      p.x += p.vx * (dt * 0.55);
+      p.y += p.vy * (dt * 0.55);
+
+      p.life++;
+
+      const out =
+        p.life > p.ttl ||
+        p.x < -30 || p.y < -30 ||
+        p.x > state.w + 30 || p.y > state.h + 30;
+
+      if (out) {
+        p.life = 0;
+        p.x = rand(i * 3.11 + now * 0.00003) * state.w;
+        p.y = rand(i * 8.17 + now * 0.00005) * state.h;
+        p.vx = 0;
+        p.vy = 0;
+        continue;
+      }
+
+      const alpha = Math.min(0.16, 0.03 + (p.life / p.ttl) * 0.13);
+      const shade = 214 + Math.floor(28 * rand(i * 2.71));
+      ctx.strokeStyle = `rgba(${shade},${shade},${shade},${alpha})`;
+
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+    requestAnimationFrame(step);
+  }
+
+  state.ro = new ResizeObserver(() => resize());
+  state.ro.observe(canvas);
+
+  resize();
+  requestAnimationFrame(step);
+
+  return {
+    destroy() {
+      state.stop = true;
+      try { state.ro?.disconnect(); } catch {}
+    },
+  };
 }
 
 function applyAndRender() {
@@ -336,7 +532,6 @@ async function init() {
     return;
   }
 
-  // NEW: Global sort by sortYear (DESC), fallback by title (ASC)
   allItems = sortItemsByYear(allItems);
 
   els.chips.forEach((btn) => {
