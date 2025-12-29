@@ -1,11 +1,8 @@
 // assets/js/app.js
 // Loads items from Cloudflare Worker /items (D1) and renders cards.
-// Provides search + type filter.
-// Sorts globally by sortYear (DESC), fallback by title (ASC).
 
 const WORKER_BASE =
   "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
-
 const ITEMS_URL = `${WORKER_BASE}/items`;
 
 const els = {
@@ -17,6 +14,8 @@ const els = {
 
 let allItems = [];
 let activeFilter = "all";
+
+/* ---------------- utilities ---------------- */
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (m) => ({
@@ -35,204 +34,88 @@ function normalizeText(s) {
     .replace(/\p{Diacritic}/gu, "");
 }
 
-function isLikelyUrlOrPath(s) {
-  const v = String(s || "").trim();
-  if (!v) return false;
-  return v.includes("/") || v.startsWith("http://") || v.startsWith("https://");
-}
-
-function normalizeTags(tags) {
-  if (Array.isArray(tags)) return tags.map(String).filter(Boolean);
-
-  if (typeof tags === "string") {
-    const t = tags.trim();
-    if (!t) return [];
-    try {
-      const parsed = JSON.parse(t);
-      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
-    } catch {}
-    return t
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
-  }
-
-  return [];
-}
-
-function safeJsonParse(value) {
-  if (value == null) return null;
-  if (typeof value === "object") return value;
-  if (typeof value !== "string") return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
+function safeJsonParse(v) {
+  if (v == null) return null;
+  if (typeof v === "object") return v;
+  try { return JSON.parse(v); } catch { return null; }
 }
 
 function normalizeItem(raw) {
   const it = { ...(raw || {}) };
-
-  it.tags = normalizeTags(it.tags);
-  it.imageUrl = typeof it.imageUrl === "string" ? it.imageUrl.trim() : "";
-  it.image = typeof it.image === "string" ? it.image.trim() : "";
+  it.tags = Array.isArray(it.tags) ? it.tags : [];
   it.meta = safeJsonParse(it.meta);
-
-  if (typeof it.sortYear === "string") {
-    const n = parseInt(it.sortYear, 10);
-    it.sortYear = Number.isFinite(n) ? n : null;
-  } else if (typeof it.sortYear !== "number") {
-    it.sortYear = null;
-  }
-
+  it.imageUrl = typeof it.imageUrl === "string" ? it.imageUrl : "";
+  it.sortYear =
+    typeof it.sortYear === "number" ? it.sortYear :
+    Number.isFinite(parseInt(it.sortYear, 10)) ? parseInt(it.sortYear, 10) :
+    null;
   return it;
 }
 
-function resolveImagePath(item) {
-  const imageUrl = String(item?.imageUrl ?? "").trim();
-  if (imageUrl) return imageUrl;
-
-  const img = String(item?.image ?? "").trim();
-  if (!img) return "";
-
-  if (isLikelyUrlOrPath(img)) return img;
-
-  const type = String(item?.type ?? "").trim().toLowerCase();
-
-  const folderByType = {
-    people: "people",
-    projects: "projects",
-    concepts: "concepts",
-    orgs: "orgs",
-    topics: "topics",
-    books: "books",
-    movies: "movies",
-
-    // legacy support
-    person: "people",
-    project: "projects",
-    concept: "concepts",
-    org: "orgs",
-    topic: "topics",
-    book: "books",
-    movie: "movies",
-  };
-
-  const folder = folderByType[type];
-  return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
-}
+/* ---------------- data ---------------- */
 
 async function loadItems() {
   const res = await fetch(ITEMS_URL, { cache: "no-store" });
-  const data = await res.json();
-
-  if (data && typeof data === "object" && Array.isArray(data.items)) {
-    return data.items.map(normalizeItem);
-  }
-
-  return [];
+  const json = await res.json();
+  return Array.isArray(json.items)
+    ? json.items.map(normalizeItem)
+    : [];
 }
 
-function setActiveChip(filter) {
-  activeFilter = filter;
-  els.chips.forEach((b) => {
-    const isActive = b.dataset.filter === filter;
-    b.classList.toggle("is-active", isActive);
-  });
-}
+/* ---------------- render ---------------- */
 
-function passesFilter(item, q, filter) {
-  const type = String(item.type ?? "").toLowerCase();
-
-  if (filter !== "all" && type !== filter) return false;
-  if (!q) return true;
-
-  const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-
-  const hay = [
-    item.title,
-    item.summary,
-    item.href,
-    ...(Array.isArray(item.tags) ? item.tags : []),
-    item.type,
-    meta ? JSON.stringify(meta) : "",
-  ]
-    .map(normalizeText)
-    .join(" ");
-
-  return hay.includes(q);
-}
-
-function formatPersonTitle(title, birthYear, deathYear) {
-  if (birthYear == null && deathYear == null) return title;
-
-  let yearStr = "";
-  if (birthYear != null) yearStr = String(birthYear);
-
-  if (deathYear != null) yearStr += "-" + String(deathYear);
-  else if (birthYear != null) yearStr += "-";
-
-  return yearStr ? `${title} (${yearStr})` : title;
-}
-
-function getPeopleYears(item) {
-  const meta = item?.meta && typeof item.meta === "object" ? item.meta : null;
-
-  const birth =
-    meta?.birthYear != null
-      ? parseInt(meta.birthYear, 10)
-      : item.birthYear != null
-      ? parseInt(item.birthYear, 10)
-      : null;
-
-  const death =
-    meta?.deathYear != null
-      ? parseInt(meta.deathYear, 10)
-      : item.deathYear != null
-      ? parseInt(item.deathYear, 10)
-      : null;
-
-  return {
-    birthYear: Number.isFinite(birth) ? birth : null,
-    deathYear: Number.isFinite(death) ? death : null,
-  };
-}
-
-function sortItemsByYear(items) {
-  return [...items].sort((a, b) => {
-    const ay = typeof a.sortYear === "number" ? a.sortYear : null;
-    const by = typeof b.sortYear === "number" ? b.sortYear : null;
-
-    if (ay != null && by != null && ay !== by) return by - ay; // DESC
-    if (ay != null && by == null) return -1;
-    if (ay == null && by != null) return 1;
-
-    const at = String(a.title || "").toLowerCase();
-    const bt = String(b.title || "").toLowerCase();
-    return at.localeCompare(bt);
-  });
-}
-
-// --- Media renderer: books get fixed cover + dust + soft fade (no CSS edits) ---
 function renderMedia(type, imagePath, title) {
-  const t = String(type || "").toLowerCase();
-  const isBook = t === "book" || t === "books";
+  const isBook = String(type).toLowerCase() === "book";
 
   if (!isBook) {
     return `
       <div class="card__media">
-        ${imagePath ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">` : ``}
-        <div class="card__fade" aria-hidden="true"></div>
+        ${imagePath ? `<img class="card__img" src="${imagePath}">` : ""}
+        <div class="card__fade"></div>
       </div>
     `;
   }
 
+  /* ⭐ KEY PART: ONE shared background + one shared gradient */
   return `
-    <div class="card__media" style="display:flex; gap:18px; align-items:stretch;">
+    <div class="card__media" style="
+      position:relative;
+      display:flex;
+      gap:18px;
+      align-items:stretch;
+      overflow:hidden;
+      border-radius:16px;
+      background: radial-gradient(
+        140% 120% at 18% 35%,
+        rgba(255,255,255,0.12),
+        rgba(0,0,0,0.92)
+      );
+    ">
 
-      <!-- left: fixed cover box -->
+      <!-- unified soft grey → black fade -->
+      <div aria-hidden="true" style="
+        position:absolute;
+        inset:0;
+        background:
+          radial-gradient(
+            140% 110% at 18% 38%,
+            rgba(255,255,255,0.12),
+            transparent 58%
+          ),
+          linear-gradient(
+            90deg,
+            rgba(255,255,255,0.10),
+            rgba(0,0,0,0.78) 72%,
+            rgba(0,0,0,0.97)
+          );
+        pointer-events:none;
+        z-index:1;
+      "></div>
+
+      <!-- cover -->
       <div style="
+        position:relative;
+        z-index:2;
         flex:0 0 240px;
         display:flex;
         align-items:center;
@@ -240,316 +123,138 @@ function renderMedia(type, imagePath, title) {
         padding:14px;
         border-radius:16px;
         overflow:hidden;
-        position:relative;
-        background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.10), rgba(0,0,0,0.75));
       ">
-        ${
-          imagePath
-            ? `<img
-                src="${imagePath}"
-                alt="${title}"
-                loading="lazy"
-                style="
-                  width:100%;
-                  height:100%;
-                  object-fit:contain;
-                  display:block;
-                  border-radius:12px;
-                  filter: grayscale(1) contrast(1.05) brightness(.92);
-                "
-              >`
-            : ``
-        }
+        <img
+          src="${imagePath}"
+          alt="${title}"
+          style="
+            width:100%;
+            height:100%;
+            object-fit:contain;
+            border-radius:12px;
+            filter:grayscale(1) contrast(1.05) brightness(.92);
+          "
+        >
       </div>
 
-      <!-- right: dust area -->
+      <!-- dust -->
       <div style="
         position:relative;
+        z-index:2;
         flex:1;
-        border-radius:16px;
-        overflow:hidden;
         min-height:340px;
-        background: radial-gradient(120% 120% at 25% 20%, rgba(255,255,255,0.08), rgba(0,0,0,0.92));
+        overflow:hidden;
+        border-radius:16px;
       ">
         <canvas
           data-dust="1"
-          aria-hidden="true"
-          style="
-            position:absolute;
-            inset:0;
-            width:100%;
-            height:100%;
-            display:block;
-          "
+          style="position:absolute; inset:0; width:100%; height:100%;"
         ></canvas>
-
-        <!-- soft grey->black fade overlay -->
-        <div aria-hidden="true" style="
-          position:absolute;
-          inset:0;
-          background:
-            radial-gradient(140% 110% at 20% 40%, rgba(255,255,255,0.10), transparent 55%),
-            linear-gradient(90deg, rgba(255,255,255,0.06), rgba(0,0,0,0.85) 65%, rgba(0,0,0,0.95));
-          pointer-events:none;
-        "></div>
       </div>
 
-      <div class="card__fade" aria-hidden="true"></div>
+      <div class="card__fade"></div>
     </div>
   `;
 }
 
 function render(items) {
-  if (!els.cards) return;
-
-  if (!items.length) {
-    els.cards.innerHTML = `
-      <div class="card">
-        <div class="card__row" style="grid-template-columns:1fr">
-          <div class="card__content">
-            <div class="card__kicker">No results</div>
-            <p class="page__lead">Nothing matched your filter/search.</p>
-          </div>
+  els.cards.innerHTML = items.map((item) => `
+    <article class="card">
+      <div class="card__row">
+        ${renderMedia(
+          item.type,
+          escapeHtml(item.imageUrl),
+          escapeHtml(item.title)
+        )}
+        <div class="card__content">
+          <div class="card__kicker">${escapeHtml(item.type)}</div>
+          <h2 class="card__title">${escapeHtml(item.title)}</h2>
+          ${item.summary ? `<p class="card__summary">${escapeHtml(item.summary)}</p>` : ""}
+          ${
+            item.tags?.length
+              ? `<div class="card__meta">
+                  ${item.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
+                </div>`
+              : ""
+          }
         </div>
       </div>
-    `;
-    return;
-  }
-
-  els.cards.innerHTML = items
-    .map((item) => {
-      let title = escapeHtml(item.title || "");
-      const href = escapeHtml(item.href || "");
-      const summary = escapeHtml(item.summary || "");
-      const tags = Array.isArray(item.tags) ? item.tags : [];
-      const imagePath = escapeHtml(resolveImagePath(item));
-      const type = String(item.type || "").toLowerCase();
-
-      if (type === "people" || type === "person") {
-        const { birthYear, deathYear } = getPeopleYears(item);
-        title = escapeHtml(formatPersonTitle(item.title || "", birthYear, deathYear));
-      }
-
-      const hasLink = href && href !== "kein Wiki";
-
-      return `
-        <article class="card">
-          <div class="card__row">
-            ${renderMedia(type, imagePath, title)}
-
-            <div class="card__content">
-              <div class="card__kicker">${escapeHtml(type)}</div>
-
-              <h2 class="card__title">
-                ${
-                  hasLink
-                    ? `<a href="${href}" target="_blank" rel="noopener">${title}</a>`
-                    : `${title}`
-                }
-              </h2>
-
-              ${summary ? `<p class="card__summary">${summary}</p>` : ""}
-
-              ${
-                tags.length
-                  ? `<div class="card__meta" aria-label="tags">
-                      ${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
-                     </div>`
-                  : ``
-              }
-            </div>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+    </article>
+  `).join("");
 
   requestAnimationFrame(initDustCanvases);
 }
 
-// --- Dust engine (per-canvas) ---
-const __dust = new WeakMap();
+/* ---------------- dust ---------------- */
+
+const dustMap = new WeakMap();
 
 function initDustCanvases() {
-  const canvases = Array.from(document.querySelectorAll('canvas[data-dust="1"]'));
-  for (const canvas of canvases) {
-    if (__dust.has(canvas)) continue;
-    __dust.set(canvas, createDust(canvas));
-  }
+  document.querySelectorAll("canvas[data-dust]").forEach((c) => {
+    if (!dustMap.has(c)) dustMap.set(c, createDust(c));
+  });
 }
 
 function createDust(canvas) {
-  const ctx = canvas.getContext("2d", { alpha: true });
-
-  const state = {
-    w: 0,
-    h: 0,
-    last: performance.now(),
-    seeds: [],
-    ro: null,
-    stop: false,
-  };
+  const ctx = canvas.getContext("2d");
+  let w, h;
+  let parts = [];
 
   function resize() {
-    const rect = canvas.getBoundingClientRect();
+    const r = canvas.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
+    w = canvas.width = r.width * dpr;
+    h = canvas.height = r.height * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
 
-    state.w = Math.max(1, Math.floor(rect.width));
-    state.h = Math.max(1, Math.floor(rect.height));
-
-    canvas.width = Math.floor(state.w * dpr);
-    canvas.height = Math.floor(state.h * dpr);
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    seed();
-    ctx.clearRect(0, 0, state.w, state.h);
+    parts = Array.from({ length: Math.max(300, (r.width*r.height)/3000) }, () => ({
+      x: Math.random()*r.width,
+      y: Math.random()*r.height,
+      vx: 0,
+      vy: 0,
+      life: Math.random()*300
+    }));
   }
 
-  function rand(n) {
-    const x = Math.sin(n) * 10000;
-    return x - Math.floor(x);
-  }
-
-  function seed() {
-    const count = Math.floor(Math.min(900, Math.max(260, (state.w * state.h) / 2600)));
-    state.seeds = new Array(count);
-    for (let i = 0; i < count; i++) {
-      state.seeds[i] = {
-        x: rand(i * 12.17) * state.w,
-        y: rand(i * 91.31) * state.h,
-        vx: 0,
-        vy: 0,
-        life: 0,
-        ttl: 220 + Math.floor(rand(i * 7.77) * 260),
-      };
-    }
-  }
-
-  function field(x, y, t) {
-    const nx = x / Math.max(1, state.w);
-    const ny = y / Math.max(1, state.h);
-
-    const a = Math.sin(t * 0.00018 + nx * 6.0) * 0.8;
-    const b = Math.cos(t * 0.00014 + ny * 5.0) * 0.8;
-
-    const ang = (a + b) * 1.1 + (nx - 0.5) * 0.6 - (ny - 0.5) * 0.4;
-    const mag = 0.9;
-
-    return { ax: Math.cos(ang) * mag, ay: Math.sin(ang) * mag };
-  }
-
-  function step(now) {
-    if (state.stop) return;
-
-    const dt = Math.min(32, now - state.last);
-    state.last = now;
-
-    // subtle trail (lower alpha keeps dust visible)
+  function step() {
     ctx.fillStyle = "rgba(0,0,0,0.06)";
-    ctx.fillRect(0, 0, state.w, state.h);
+    ctx.fillRect(0,0,w,h);
 
-    ctx.lineWidth = 1;
     ctx.globalCompositeOperation = "lighter";
+    parts.forEach(p => {
+      const ox = p.x, oy = p.y;
+      p.vx += (Math.random()-0.5)*0.02;
+      p.vy += (Math.random()-0.5)*0.02;
+      p.x += p.vx;
+      p.y += p.vy;
 
-    for (let i = 0; i < state.seeds.length; i++) {
-      const p = state.seeds[i];
-      const px = p.x, py = p.y;
-
-      const f = field(p.x, p.y, now);
-
-      p.vx = p.vx * 0.94 + f.ax * 0.55;
-      p.vy = p.vy * 0.94 + f.ay * 0.55;
-
-      p.x += p.vx * (dt * 0.55);
-      p.y += p.vy * (dt * 0.55);
-
-      p.life++;
-
-      const out =
-        p.life > p.ttl ||
-        p.x < -30 || p.y < -30 ||
-        p.x > state.w + 30 || p.y > state.h + 30;
-
-      if (out) {
-        p.life = 0;
-        p.x = rand(i * 3.11 + now * 0.00003) * state.w;
-        p.y = rand(i * 8.17 + now * 0.00005) * state.h;
-        p.vx = 0;
-        p.vy = 0;
-        continue;
+      if (p.x<0||p.y<0||p.x>w||p.y>h) {
+        p.x=Math.random()*w;
+        p.y=Math.random()*h;
+        p.vx=p.vy=0;
       }
 
-      const alpha = Math.min(0.16, 0.03 + (p.life / p.ttl) * 0.13);
-      const shade = 214 + Math.floor(28 * rand(i * 2.71));
-      ctx.strokeStyle = `rgba(${shade},${shade},${shade},${alpha})`;
-
+      ctx.strokeStyle="rgba(220,220,220,0.15)";
       ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(p.x, p.y);
+      ctx.moveTo(ox,oy);
+      ctx.lineTo(p.x,p.y);
       ctx.stroke();
-    }
-
+    });
     ctx.globalCompositeOperation = "source-over";
     requestAnimationFrame(step);
   }
 
-  state.ro = new ResizeObserver(() => resize());
-  state.ro.observe(canvas);
-
+  new ResizeObserver(resize).observe(canvas);
   resize();
-  requestAnimationFrame(step);
-
-  return {
-    destroy() {
-      state.stop = true;
-      try { state.ro?.disconnect(); } catch {}
-    },
-  };
+  step();
 }
 
-function applyAndRender() {
-  const q = normalizeText(els.q?.value || "");
-  const filtered = allItems.filter((it) => passesFilter(it, q, activeFilter));
-  render(filtered);
-}
+/* ---------------- init ---------------- */
 
 async function init() {
-  if (els.year) els.year.textContent = String(new Date().getFullYear());
-
-  try {
-    allItems = await loadItems();
-  } catch (e) {
-    console.error(e);
-    if (els.cards) {
-      els.cards.innerHTML = `
-        <div class="card">
-          <div class="card__row" style="grid-template-columns:1fr">
-            <div class="card__content">
-              <div class="card__kicker">Error</div>
-              <pre class="code" style="white-space:pre-wrap;">${escapeHtml(
-                e?.message || e
-              )}</pre>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-    return;
-  }
-
-  allItems = sortItemsByYear(allItems);
-
-  els.chips.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setActiveChip(btn.dataset.filter || "all");
-      applyAndRender();
-    });
-  });
-
-  els.q?.addEventListener("input", () => applyAndRender());
-
-  setActiveChip("all");
-  applyAndRender();
+  if (els.year) els.year.textContent = new Date().getFullYear();
+  allItems = await loadItems();
+  render(allItems);
 }
 
 init();
