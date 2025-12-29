@@ -2,6 +2,10 @@
 // Loads items from Cloudflare Worker /items (D1) and renders cards.
 // Search + type filter (chips).
 // Sorts by sortYear (DESC), fallback title (ASC).
+//
+// Updated: Stardust is now a SINGLE global background canvas behind all tiles.
+// - No per-card / per-book dust canvases anymore (prevents seams + blocks)
+// - Canvas is injected automatically if not present in HTML
 
 const WORKER_BASE =
   "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
@@ -54,14 +58,16 @@ function safeJsonParse(value) {
 }
 
 function normalizeTags(tags) {
-  if (Array.isArray(tags)) return tags.map(String).map((x) => x.trim()).filter(Boolean);
+  if (Array.isArray(tags))
+    return tags.map(String).map((x) => x.trim()).filter(Boolean);
 
   if (typeof tags === "string") {
     const t = tags.trim();
     if (!t) return [];
     try {
       const parsed = JSON.parse(t);
-      if (Array.isArray(parsed)) return parsed.map(String).map((x) => x.trim()).filter(Boolean);
+      if (Array.isArray(parsed))
+        return parsed.map(String).map((x) => x.trim()).filter(Boolean);
     } catch {}
     return t.split(",").map((x) => x.trim()).filter(Boolean);
   }
@@ -193,8 +199,8 @@ function renderMediaDefault(imagePath, title) {
   `;
 }
 
-// Book: unified gradient across cover + dust so there is no seam.
-// Also hides broken images and keeps the cover area stable.
+// Book: unified gradient across cover + right panel.
+// Stardust is now GLOBAL behind all tiles, so no per-book canvas here anymore.
 function renderMediaBook(imagePath, title) {
   const hasImg = Boolean(String(imagePath || "").trim());
 
@@ -261,7 +267,7 @@ function renderMediaBook(imagePath, title) {
         }
       </div>
 
-      <!-- dust area -->
+      <!-- right panel (kept for layout balance; global stardust is behind the whole page) -->
       <div style="
         position:relative;
         z-index:2;
@@ -269,13 +275,8 @@ function renderMediaBook(imagePath, title) {
         min-height:340px;
         overflow:hidden;
         border-radius:16px;
-      ">
-        <canvas
-          data-dust="1"
-          aria-hidden="true"
-          style="position:absolute; inset:0; width:100%; height:100%; display:block;"
-        ></canvas>
-      </div>
+        background: transparent;
+      "></div>
 
       <div class="card__fade" aria-hidden="true"></div>
     </div>
@@ -348,40 +349,63 @@ function render(items) {
       `;
     })
     .join("");
-
-  requestAnimationFrame(initDustCanvases);
 }
 
-/* ---------------- dust ---------------- */
+/* ---------------- global stardust (background) ---------------- */
 
-const dustMap = new WeakMap();
+let bgDust = null;
 
-function initDustCanvases() {
-  document.querySelectorAll("canvas[data-dust]").forEach((canvas) => {
-    if (dustMap.has(canvas)) return;
-    dustMap.set(canvas, createDust(canvas));
-  });
+function ensureGlobalDustCanvas() {
+  // Create canvas if missing
+  let canvas = document.getElementById("stardust-bg");
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.id = "stardust-bg";
+    document.body.prepend(canvas);
+  }
+
+  // Ensure required styling (safe even if you also set CSS in your stylesheet)
+  canvas.style.position = "fixed";
+  canvas.style.inset = "0";
+  canvas.style.zIndex = "0";
+  canvas.style.pointerEvents = "none";
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.setAttribute("aria-hidden", "true");
+
+  // Make common containers sit above it (only if not already done in CSS)
+  // This is intentionally minimal; your CSS can override.
+  const bump = (sel) => {
+    document.querySelectorAll(sel).forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.position === "static") el.style.position = "relative";
+      if (!el.style.zIndex) el.style.zIndex = "1";
+    });
+  };
+  bump(".main_page");
+  bump(".sectionCardsStack");
+  bump(".card");
+
+  return canvas;
 }
 
-function createDust(canvas) {
+function createDustFixed(canvas) {
   const ctx = canvas.getContext("2d", { alpha: true });
-
   let cssW = 1;
   let cssH = 1;
   let parts = [];
 
   function resize() {
-    const r = canvas.getBoundingClientRect();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-
-    cssW = Math.max(1, Math.floor(r.width));
-    cssH = Math.max(1, Math.floor(r.height));
+    cssW = Math.max(1, Math.floor(window.innerWidth));
+    cssH = Math.max(1, Math.floor(window.innerHeight));
 
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const count = Math.floor(Math.min(900, Math.max(260, (cssW * cssH) / 2600)));
+    // Density tuned for full-screen; keep it subtle
+    const count = Math.floor(Math.min(1400, Math.max(380, (cssW * cssH) / 5200)));
     parts = Array.from({ length: count }, () => ({
       x: Math.random() * cssW,
       y: Math.random() * cssH,
@@ -393,16 +417,20 @@ function createDust(canvas) {
   }
 
   function step() {
-    // Trail (increase last value for faster fade: 0.10 .. 0.14)
-    ctx.fillStyle = "rgba(0,0,0,0)";
-    ctx.fillRect(0, 0, cssW, cssH);
+    // True transparent frame (no black film)
+    ctx.clearRect(0, 0, cssW, cssH);
 
-    ctx.globalCompositeOperation = "lighter";
+    // No "lighter" -> avoids whitening / snow effect
+    ctx.globalCompositeOperation = "source-over";
+
+    // Subtle dust strokes
+    ctx.strokeStyle = "rgba(170,170,170,0.05)";
 
     for (const p of parts) {
       const ox = p.x;
       const oy = p.y;
 
+      // Gentle random walk
       p.vx += (Math.random() - 0.5) * 0.02;
       p.vy += (Math.random() - 0.5) * 0.02;
 
@@ -412,37 +440,40 @@ function createDust(canvas) {
       p.x += p.vx;
       p.y += p.vy;
 
-      if (p.x < -20 || p.y < -20 || p.x > cssW + 20 || p.y > cssH + 20) {
-        p.x = Math.random() * cssW;
-        p.y = Math.random() * cssH;
-        p.vx = 0;
-        p.vy = 0;
-        continue;
-      }
+      // Wrap around edges (more stable than respawning)
+      if (p.x < 0) p.x += cssW;
+      if (p.x >= cssW) p.x -= cssW;
+      if (p.y < 0) p.y += cssH;
+      if (p.y >= cssH) p.y -= cssH;
 
-      // Line visibility (lower alpha = subtler)
-      ctx.strokeStyle = "rgba(220,220,220,0.08)";
       ctx.beginPath();
       ctx.moveTo(ox, oy);
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
     }
 
-    ctx.globalCompositeOperation = "source-over";
     requestAnimationFrame(step);
   }
 
-  const ro = new ResizeObserver(resize);
-  ro.observe(canvas);
+  const onResize = () => resize();
+  window.addEventListener("resize", onResize, { passive: true });
 
   resize();
   requestAnimationFrame(step);
 
   return {
     destroy() {
-      try { ro.disconnect(); } catch {}
+      try {
+        window.removeEventListener("resize", onResize);
+      } catch {}
     },
   };
+}
+
+function initGlobalDust() {
+  const canvas = ensureGlobalDustCanvas();
+  if (bgDust) return;
+  bgDust = createDustFixed(canvas);
 }
 
 /* ---------------- init ---------------- */
@@ -455,6 +486,9 @@ function applyAndRender() {
 
 async function init() {
   if (els.year) els.year.textContent = String(new Date().getFullYear());
+
+  // Start global background dust once
+  initGlobalDust();
 
   try {
     allItems = await loadItems();
