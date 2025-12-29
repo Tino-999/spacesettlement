@@ -22,7 +22,7 @@
   <main class="page">
     <div class="page__intro">
       <h1 class="page__title">Items</h1>
-      <p class="page__lead">Read-only table view from /items.</p>
+      <p class="page__lead">Read-only table view from Cloudflare Worker /items.</p>
     </div>
 
     <section class="card">
@@ -55,6 +55,9 @@
 
 <script>
 (() => {
+  // Cloudflare Worker base URL (your first worker)
+  const API_BASE = "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
+
   const thead = document.getElementById("thead");
   const tbody = document.getElementById("tbody");
   const qEl = document.getElementById("q");
@@ -119,7 +122,6 @@
 
     thead.innerHTML = `<tr>${ths}</tr>`;
 
-    // click-to-sort
     thead.querySelectorAll("th").forEach(th => {
       th.addEventListener("click", () => {
         const k = th.getAttribute("data-k");
@@ -187,15 +189,21 @@
     statusEl.textContent = "Loading…";
     tbody.innerHTML = "";
     try {
-      const res = await fetch("/items");
-      const j = await res.json();
+      const res = await fetch(API_BASE + "/items", { method: "GET" });
+      const text = await res.text();
+
+      let j;
+      try { j = JSON.parse(text); }
+      catch { throw new Error("API did not return JSON. First 120 chars: " + text.slice(0,120)); }
+
       if (!res.ok || !j?.ok) throw new Error(j?.error || ("HTTP " + res.status));
+
       items = Array.isArray(j.items) ? j.items : [];
       render();
       statusEl.textContent = `${items.length} loaded`;
     } catch (e) {
       statusEl.textContent = "Error: " + (e?.message || e);
-      tbody.innerHTML = `<tr><td style="padding:10px;">Failed to load /items</td></tr>`;
+      tbody.innerHTML = `<tr><td style="padding:10px;">Failed to load items.</td></tr>`;
     }
   }
 
