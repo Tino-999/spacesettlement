@@ -1,6 +1,5 @@
 // editor.js (FULL)
-// Uses Worker API. You can override API base via:
-//   /admin?api=https://<your-worker>.workers.dev
+// /admin?api=https://<your-worker>.workers.dev
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,20 +16,14 @@ const BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest`;
 const BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
 const BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
 
-const PEOPLE_SUGGEST_URL = `${WORKER_BASE}/people/suggest`;
-const PEOPLE_AUTOFILL_URL = `${WORKER_BASE}/people/autofill`;
-
 const publishedEl = $("published");
 
 let latestBookSuggestions = [];
 let lastBookQuery = "";
 let lastBookFacts = null;
 
-let latestPeopleSuggestions = [];
-let lastPeopleQuery = "";
-
 // -------------------------
-// Small helpers
+// Helpers
 // -------------------------
 const normalizeType = (t) => {
   const s = String(t || "").trim().toLowerCase();
@@ -38,30 +31,22 @@ const normalizeType = (t) => {
   if (s === "people") return "person";
   return s;
 };
-
 const isBookType = () => normalizeType(getValue("type")) === "book";
-const isPersonType = () => normalizeType(getValue("type")) === "person";
 
 function getValue(id) {
   const el = $(id);
   if (!el) return "";
   return (el.value ?? "").toString().trim();
 }
-
 function setValue(id, v) {
   const el = $(id);
   if (!el) return;
   el.value = v == null ? "" : String(v);
 }
-
 function setOutput(objOrText) {
   const out = $("output");
   if (!out) return;
-  if (typeof objOrText === "string") {
-    out.textContent = objOrText;
-  } else {
-    out.textContent = JSON.stringify(objOrText, null, 2);
-  }
+  out.textContent = typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
 }
 
 async function safeReadJson(res) {
@@ -83,9 +68,6 @@ function requireAdminToken(actionLabel = "Aktion") {
   return token || "";
 }
 
-// -------------------------
-// Build item JSON (for publish)
-// -------------------------
 function buildItem() {
   const type = normalizeType(getValue("type"));
   const title = getValue("title");
@@ -94,7 +76,7 @@ function buildItem() {
     type,
     title,
     href: getValue("href"),
-    imageUrl: getValue("imageUrl") || getValue("image"),
+    imageUrl: getValue("imageUrl") || "",
     summary: getValue("summary"),
     tags: getValue("tags")
       .split(",")
@@ -102,43 +84,6 @@ function buildItem() {
       .filter(Boolean),
     meta: null,
   };
-
-  if (type === "person") {
-    const meta = {};
-    const by = Number(getValue("birthYear")) || null;
-    const dy = Number(getValue("deathYear")) || null;
-    const asy = Number(getValue("activeStartYear")) || null;
-    const aey = Number(getValue("activeEndYear")) || null;
-
-    const nat = getValue("nationality")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const aff = getValue("affiliations")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const roles = getValue("roles")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    if (by) meta.birthYear = by;
-    if (dy) meta.deathYear = dy;
-    if (asy) meta.activeStartYear = asy;
-    if (aey) meta.activeEndYear = aey;
-    if (nat.length) meta.nationality = nat;
-    if (aff.length) meta.affiliations = aff;
-    if (roles.length) meta.roles = roles;
-
-    // If we got a wikipedia url from autofill, keep it
-    const wiki = (lastPersonFacts?.wikipediaUrl || "").trim();
-    if (wiki) meta.wikipediaUrl = wiki;
-
-    item.meta = Object.keys(meta).length ? meta : null;
-  }
 
   if (type === "book") {
     const meta = {};
@@ -148,13 +93,15 @@ function buildItem() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const py = Number(getValue("publishedYear")) || null;
+    const publishedYear = Number(getValue("publishedYear")) || null; // edition
+    const firstPublishYear = Number(getValue("firstPublishYear")) || null; // original
     const publisher = getValue("publisher");
     const isbn = getValue("isbn");
     const language = getValue("language");
 
     if (authors.length) meta.authors = authors;
-    if (py) meta.publishedYear = py;
+    if (publishedYear) meta.publishedYear = publishedYear;
+    if (firstPublishYear) meta.firstPublishYear = firstPublishYear;
     if (publisher) meta.publisher = publisher;
     if (isbn) meta.isbn = isbn;
     if (language) meta.language = language;
@@ -169,7 +116,7 @@ function buildItem() {
 }
 
 // -------------------------
-// Upload image (R2 via Worker)
+// Upload image (optional; but now you usually won’t need it)
 // -------------------------
 async function uploadImageToR2() {
   const fileInput = $("imageFile");
@@ -199,7 +146,9 @@ async function uploadImageToR2() {
 
     const parsed = await safeReadJson(res);
     if (!res.ok) {
-      return setOutput(`Upload Fehler (${res.status}):\n${parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw}`);
+      return setOutput(
+        `Upload Fehler (${res.status}):\n${parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw}`
+      );
     }
 
     const data = parsed.ok ? parsed.json : null;
@@ -215,7 +164,7 @@ async function uploadImageToR2() {
 }
 
 // -------------------------
-// Publish (POST /items)
+// Publish
 // -------------------------
 async function publishItem() {
   const token = requireAdminToken("Publish");
@@ -253,12 +202,6 @@ async function publishItem() {
 
   setOutput({ ok: true, published: parsed.ok ? parsed.json : null });
   alert("Item veröffentlicht ✔");
-
-  latestBookSuggestions = [];
-  lastBookQuery = "";
-  latestPeopleSuggestions = [];
-  lastPeopleQuery = "";
-
   await loadPublished();
 }
 
@@ -344,15 +287,15 @@ function pickBestBookSuggestion(titleText) {
   const t = String(titleText || "").trim().toLowerCase();
   if (!latestBookSuggestions.length) return null;
 
-  // 1) exact match
-  const exact = latestBookSuggestions.find((s) => String(s.title || "").toLowerCase() === t);
-  if (exact) return exact;
-
-  // 2) prefer mapped-from-german (original title) if worker provided it
+  // 1) prefer mapped original (worker marks it)
   const mapped = latestBookSuggestions.find((s) => s && s.mappedFromGermanTitle === true);
   if (mapped) return mapped;
 
-  // 3) fallback: first suggestion
+  // 2) exact match
+  const exact = latestBookSuggestions.find((s) => String(s.title || "").toLowerCase() === t);
+  if (exact) return exact;
+
+  // 3) fallback: first
   return latestBookSuggestions[0];
 }
 
@@ -370,14 +313,30 @@ async function runBookAutofill() {
     const facts = await booksAutofillFacts(match.openLibraryId);
     lastBookFacts = facts;
 
-    // Fill fields from facts
+    // Always switch title/authors to ORIGINAL work title if mapping was used
     if (facts.title) setValue("title", facts.title);
     if (Array.isArray(facts.authors)) setValue("authors", facts.authors.join(", "));
+
+    // Concrete edition
     if (facts.publishedYear) setValue("publishedYear", facts.publishedYear);
     if (facts.publisher) setValue("publisher", facts.publisher);
     if (facts.isbn) setValue("isbn", facts.isbn);
     if (facts.language) setValue("language", facts.language);
+
+    // Original first publish year (separately)
+    if (facts.firstPublishYear) setValue("firstPublishYear", facts.firstPublishYear);
+
+    // Link to Wikipedia (best effort)
     if (facts.wikipediaUrl) setValue("href", facts.wikipediaUrl);
+
+    // Cover auto (use OpenLibrary cover if present)
+    if (facts.coverUrl) {
+      // only overwrite if empty OR looks like placeholder
+      const cur = getValue("imageUrl");
+      if (!cur || cur.includes("assets/img/") || cur.includes("...images/file")) {
+        setValue("imageUrl", facts.coverUrl);
+      }
+    }
 
     setOutput("Autofill läuft… (AI summary/tags)");
     await booksEnrichSummaryTags({
@@ -388,6 +347,7 @@ async function runBookAutofill() {
       isbn: facts.isbn || "",
       language: facts.language || "",
       subjects: facts.subjects || [],
+      firstPublishYear: facts.firstPublishYear || null,
     });
 
     setOutput(buildItem());
@@ -398,155 +358,40 @@ async function runBookAutofill() {
 
 // Live suggestions
 $("title")?.addEventListener("input", async () => {
-  if (isBookType()) {
-    const q = getValue("title");
-    const list = $("titleSuggestions");
-    if (!list) return;
+  if (!isBookType()) return;
 
-    list.innerHTML = "";
+  const q = getValue("title");
+  const list = $("titleSuggestions");
+  if (!list) return;
+
+  list.innerHTML = "";
+  latestBookSuggestions = [];
+
+  if (!q || q.length < 2) return;
+  if (q.toLowerCase() === lastBookQuery.toLowerCase()) return;
+  lastBookQuery = q;
+
+  try {
+    latestBookSuggestions = await fetchBookSuggestions(q);
+  } catch (e) {
+    setOutput("Suggest Fehler:\n" + (e?.message || e));
     latestBookSuggestions = [];
-
-    if (!q || q.length < 2) return;
-    if (q.toLowerCase() === lastBookQuery.toLowerCase()) return;
-    lastBookQuery = q;
-
-    try {
-      latestBookSuggestions = await fetchBookSuggestions(q);
-    } catch (e) {
-      setOutput("Suggest Fehler:\n" + (e?.message || e));
-      latestBookSuggestions = [];
-      return;
-    }
-
-    latestBookSuggestions.slice(0, 12).forEach((s) => {
-      const opt = document.createElement("option");
-      opt.value = s.title;
-      list.appendChild(opt);
-    });
     return;
   }
 
-  if (isPersonType()) {
-    const q = getValue("title");
-    const list = $("titleSuggestions");
-    if (!list) return;
-
-    list.innerHTML = "";
-    latestPeopleSuggestions = [];
-
-    if (!q || q.length < 2) return;
-    if (q.toLowerCase() === lastPeopleQuery.toLowerCase()) return;
-    lastPeopleQuery = q;
-
-    try {
-      const res = await fetch(`${PEOPLE_SUGGEST_URL}?q=${encodeURIComponent(q)}`);
-      const parsed = await safeReadJson(res);
-      if (!res.ok) throw new Error(parsed.ok ? JSON.stringify(parsed.json) : parsed.raw);
-      latestPeopleSuggestions = parsed.json?.suggestions || [];
-    } catch (e) {
-      setOutput("Person Suggest Fehler:\n" + (e?.message || e));
-      latestPeopleSuggestions = [];
-      return;
-    }
-
-    latestPeopleSuggestions.slice(0, 12).forEach((s) => {
-      const opt = document.createElement("option");
-      opt.value = s.title;
-      list.appendChild(opt);
-    });
-  }
+  latestBookSuggestions.slice(0, 12).forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.title;
+    list.appendChild(opt);
+  });
 });
 
-// -------------------------
-// People: Autofill
-// -------------------------
-let lastPersonFacts = null;
-
-function pickBestPersonSuggestion(titleText) {
-  const t = String(titleText || "").trim().toLowerCase();
-  if (!latestPeopleSuggestions.length) return { title: titleText };
-
-  const exact = latestPeopleSuggestions.find((s) => String(s.title || "").toLowerCase() === t);
-  if (exact) return exact;
-
-  return { title: titleText };
-}
-
-async function runPersonAutofill() {
-  if (!isPersonType()) return;
-
-  const name = getValue("title");
-  if (!name || name.length < 2) return setOutput("Bitte einen Namen eingeben.");
-
-  const pick = pickBestPersonSuggestion(name);
-
-  try {
-    setOutput("Person Autofill läuft…");
-
-    const res = await fetch(PEOPLE_AUTOFILL_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: pick.title, wikipediaUrl: pick.wikipediaUrl || "" }),
-    });
-
-    const parsed = await safeReadJson(res);
-    if (!res.ok) throw new Error(parsed.ok ? JSON.stringify(parsed.json) : parsed.raw);
-
-    const facts = parsed.json;
-    lastPersonFacts = facts;
-
-    if (facts.title) setValue("title", facts.title);
-    if (facts.wikipediaUrl) setValue("href", facts.wikipediaUrl);
-    if (facts.imageUrl) setValue("imageUrl", facts.imageUrl);
-
-    if (facts.birthYear) setValue("birthYear", facts.birthYear);
-    if (facts.deathYear) setValue("deathYear", facts.deathYear);
-
-    if (facts.summary) setValue("summary", facts.summary);
-    if (Array.isArray(facts.tags) && facts.tags.length) setValue("tags", facts.tags.join(", "));
-
-    setOutput(buildItem());
-  } catch (e) {
-    setOutput("Person Autofill Fehler: " + (e?.message || e));
-  }
-}
-
-// -------------------------
-// Wire buttons
-// -------------------------
+// Buttons
 $("generate")?.addEventListener("click", () => setOutput(buildItem()));
 $("publish")?.addEventListener("click", () => publishItem().catch((e) => setOutput(e?.message || e)));
 $("refreshList")?.addEventListener("click", () => loadPublished().catch(console.error));
 $("uploadImage")?.addEventListener("click", () => uploadImageToR2().catch(console.error));
+$("autofill")?.addEventListener("click", () => runBookAutofill());
 
-$("autofill")?.addEventListener("click", async () => {
-  if (isBookType()) return runBookAutofill();
-  if (isPersonType()) return runPersonAutofill();
-  setOutput("Autofill: Bitte Type auf book oder person setzen.");
-});
-
-$("type")?.addEventListener("change", () => {
-  const personFields = $("personFields");
-  const bookFields = $("bookFields");
-
-  if (personFields) personFields.style.display = isPersonType() ? "block" : "none";
-  if (bookFields) bookFields.style.display = isBookType() ? "block" : "none";
-
-  // clear suggestions list when switching type
-  const list = $("titleSuggestions");
-  if (list) list.innerHTML = "";
-  latestBookSuggestions = [];
-  latestPeopleSuggestions = [];
-  lastBookQuery = "";
-  lastPeopleQuery = "";
-});
-
-// initial
 loadPublished().catch(console.error);
-
-const pf = $("personFields");
-if (pf) pf.style.display = isPersonType() ? "block" : "none";
-const bf = $("bookFields");
-if (bf) bf.style.display = isBookType() ? "block" : "none";
-
 setOutput(`Editor loaded.\nAPI: ${WORKER_BASE}`);
