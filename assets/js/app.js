@@ -239,7 +239,7 @@ function renderMediaBook(imagePath, title) {
         padding:14px;
         border-radius:16px;
         overflow:hidden;
-        background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.10), rgba(0,0,0,0.85));
+        background: transparent;
       ">
         ${
           hasImg
