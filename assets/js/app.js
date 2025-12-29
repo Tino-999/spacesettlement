@@ -42,18 +42,15 @@ function isLikelyUrlOrPath(s) {
 }
 
 function normalizeTags(tags) {
-  // D1 often stores tags as JSON string -> convert to array
   if (Array.isArray(tags)) return tags.map(String).filter(Boolean);
 
   if (typeof tags === "string") {
     const t = tags.trim();
     if (!t) return [];
-    // Try JSON parse first
     try {
       const parsed = JSON.parse(t);
       if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
     } catch {}
-    // Fallback: comma-separated
     return t
       .split(",")
       .map((x) => x.trim())
@@ -77,19 +74,11 @@ function safeJsonParse(value) {
 function normalizeItem(raw) {
   const it = { ...(raw || {}) };
 
-  // Normalize tags
   it.tags = normalizeTags(it.tags);
-
-  // Normalize imageUrl field (some rows may have null)
   it.imageUrl = typeof it.imageUrl === "string" ? it.imageUrl.trim() : "";
-
-  // Normalize legacy image
   it.image = typeof it.image === "string" ? it.image.trim() : "";
-
-  // Normalize meta (worker returns object; older rows may have null/string)
   it.meta = safeJsonParse(it.meta);
 
-  // Normalize sortYear
   if (typeof it.sortYear === "string") {
     const n = parseInt(it.sortYear, 10);
     it.sortYear = Number.isFinite(n) ? n : null;
@@ -101,11 +90,9 @@ function normalizeItem(raw) {
 }
 
 function resolveImagePath(item) {
-  // Prefer remote imageUrl (new model)
   const imageUrl = String(item?.imageUrl ?? "").trim();
   if (imageUrl) return imageUrl;
 
-  // Backward-compatible fallback: local "image" filename or already-full URL/path
   const img = String(item?.image ?? "").trim();
   if (!img) return "";
 
@@ -190,7 +177,6 @@ function formatPersonTitle(title, birthYear, deathYear) {
 }
 
 function getPeopleYears(item) {
-  // Prefer meta, fallback to legacy columns
   const meta = item?.meta && typeof item.meta === "object" ? item.meta : null;
 
   const birth =
@@ -228,7 +214,7 @@ function sortItemsByYear(items) {
   });
 }
 
-// --- NEW: media renderer (books get fixed cover + dust canvas) ---
+// --- Media renderer: books get fixed cover + dust + soft fade (no CSS edits) ---
 function renderMedia(type, imagePath, title) {
   const t = String(type || "").toLowerCase();
   const isBook = t === "book" || t === "books";
@@ -242,10 +228,10 @@ function renderMedia(type, imagePath, title) {
     `;
   }
 
-  // Books: keep cover size stable + show dust on the right.
-  // No CSS changes: inline layout.
   return `
     <div class="card__media" style="display:flex; gap:18px; align-items:stretch;">
+
+      <!-- left: fixed cover box -->
       <div style="
         flex:0 0 240px;
         display:flex;
@@ -255,6 +241,7 @@ function renderMedia(type, imagePath, title) {
         border-radius:16px;
         overflow:hidden;
         position:relative;
+        background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.10), rgba(0,0,0,0.75));
       ">
         ${
           imagePath
@@ -275,17 +262,37 @@ function renderMedia(type, imagePath, title) {
         }
       </div>
 
-      <canvas
-        data-dust="1"
-        aria-hidden="true"
-        style="
-          flex:1;
-          display:block;
-          width:100%;
-          height:100%;
-          border-radius:16px;
-        "
-      ></canvas>
+      <!-- right: dust area -->
+      <div style="
+        position:relative;
+        flex:1;
+        border-radius:16px;
+        overflow:hidden;
+        min-height:340px;
+        background: radial-gradient(120% 120% at 25% 20%, rgba(255,255,255,0.08), rgba(0,0,0,0.92));
+      ">
+        <canvas
+          data-dust="1"
+          aria-hidden="true"
+          style="
+            position:absolute;
+            inset:0;
+            width:100%;
+            height:100%;
+            display:block;
+          "
+        ></canvas>
+
+        <!-- soft grey->black fade overlay -->
+        <div aria-hidden="true" style="
+          position:absolute;
+          inset:0;
+          background:
+            radial-gradient(140% 110% at 20% 40%, rgba(255,255,255,0.10), transparent 55%),
+            linear-gradient(90deg, rgba(255,255,255,0.06), rgba(0,0,0,0.85) 65%, rgba(0,0,0,0.95));
+          pointer-events:none;
+        "></div>
+      </div>
 
       <div class="card__fade" aria-hidden="true"></div>
     </div>
@@ -318,7 +325,6 @@ function render(items) {
       const imagePath = escapeHtml(resolveImagePath(item));
       const type = String(item.type || "").toLowerCase();
 
-      // Support new type "people" and legacy "person"
       if (type === "people" || type === "person") {
         const { birthYear, deathYear } = getPeopleYears(item);
         title = escapeHtml(formatPersonTitle(item.title || "", birthYear, deathYear));
@@ -358,11 +364,10 @@ function render(items) {
     })
     .join("");
 
-  // NEW: init dust canvases after DOM update
   requestAnimationFrame(initDustCanvases);
 }
 
-// --- NEW: dust engine (per-canvas) ---
+// --- Dust engine (per-canvas) ---
 const __dust = new WeakMap();
 
 function initDustCanvases() {
@@ -439,8 +444,8 @@ function createDust(canvas) {
     const dt = Math.min(32, now - state.last);
     state.last = now;
 
-    // subtle trail
-    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    // subtle trail (lower alpha keeps dust visible)
+    ctx.fillStyle = "rgba(0,0,0,0.06)";
     ctx.fillRect(0, 0, state.w, state.h);
 
     ctx.lineWidth = 1;
