@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Items Table</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+
+<body class="bg">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="index.html">SPACESETTLEMENT</a>
+      <nav class="nav">
+        <a class="nav__link" href="library.html">Index</a>
+        <a class="nav__link" href="admin.html">Admin</a>
+        <a class="nav__link is-active" href="table.html">Table</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="page__intro">
+      <h1 class="page__title">Items</h1>
+      <p class="page__lead">Read-only table view from /items.</p>
+    </div>
+
+    <section class="card">
+      <div class="card__content">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+          <input id="q" class="input" placeholder="Search title / type / tags…" style="max-width:360px;" />
+          <select id="type" class="input" style="max-width:220px;">
+            <option value="">All types</option>
+            <option value="person">person</option>
+            <option value="project">project</option>
+            <option value="org">org</option>
+            <option value="topic">topic</option>
+            <option value="concept">concept</option>
+            <option value="book">book</option>
+            <option value="movie">movie</option>
+          </select>
+          <button id="reload" class="btn">Reload</button>
+          <span id="status" style="opacity:.8;"></span>
+        </div>
+
+        <div style="overflow:auto; border-radius:14px; border:1px solid rgba(255,255,255,.08);">
+          <table id="tbl" style="width:100%; border-collapse:collapse; font-size:12px;">
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+<script>
+(() => {
+  const thead = document.getElementById("thead");
+  const tbody = document.getElementById("tbody");
+  const qEl = document.getElementById("q");
+  const typeEl = document.getElementById("type");
+  const reloadBtn = document.getElementById("reload");
+  const statusEl = document.getElementById("status");
+
+  let items = [];
+  let sortKey = "sortYear";
+  let sortDir = "desc"; // asc|desc
+
+  const colOrder = [
+    "type","title","sortYear","href","imageUrl","summary","tags","meta","id","createdAt"
+  ];
+
+  const cell = (v) => {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    try { return JSON.stringify(v); } catch { return String(v); }
+  };
+
+  const escapeHtml = (s) =>
+    String(s)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+
+  function normalizeText(row) {
+    const tags = (() => {
+      try {
+        const t = typeof row.tags === "string" ? JSON.parse(row.tags) : row.tags;
+        return Array.isArray(t) ? t.join(" ") : "";
+      } catch { return String(row.tags || ""); }
+    })();
+
+    return (
+      String(row.title || "") + " " +
+      String(row.type || "") + " " +
+      tags
+    ).toLowerCase();
+  }
+
+  function getColumns() {
+    const keys = new Set();
+    for (const it of items) Object.keys(it || {}).forEach(k => keys.add(k));
+    const all = Array.from(keys);
+    all.sort((a,b) => colOrder.indexOf(a) - colOrder.indexOf(b));
+    return all;
+  }
+
+  function renderHeader(cols) {
+    const ths = cols.map(k => {
+      const active = k === sortKey ? " style='text-decoration:underline;'" : "";
+      const arrow = k === sortKey ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+      return `<th data-k="${escapeHtml(k)}"${active}
+        style="position:sticky; top:0; background:rgba(0,0,0,.35);
+               padding:10px; text-align:left; border-bottom:1px solid rgba(255,255,255,.10);
+               white-space:nowrap; cursor:pointer;">${escapeHtml(k)}${arrow}</th>`;
+    }).join("");
+
+    thead.innerHTML = `<tr>${ths}</tr>`;
+
+    // click-to-sort
+    thead.querySelectorAll("th").forEach(th => {
+      th.addEventListener("click", () => {
+        const k = th.getAttribute("data-k");
+        if (!k) return;
+        if (sortKey === k) sortDir = (sortDir === "asc" ? "desc" : "asc");
+        else { sortKey = k; sortDir = "asc"; }
+        render();
+      });
+    });
+  }
+
+  function sortRows(rows) {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return rows.slice().sort((a,b) => {
+      const av = a?.[sortKey];
+      const bv = b?.[sortKey];
+
+      const an = (typeof av === "number") ? av : (parseFloat(av) || null);
+      const bn = (typeof bv === "number") ? bv : (parseFloat(bv) || null);
+
+      if (an != null && bn != null) return (an - bn) * dir;
+
+      const as = String(av ?? "").toLowerCase();
+      const bs = String(bv ?? "").toLowerCase();
+      if (as < bs) return -1 * dir;
+      if (as > bs) return  1 * dir;
+      return 0;
+    });
+  }
+
+  function filterRows(rows) {
+    const q = String(qEl.value || "").trim().toLowerCase();
+    const t = String(typeEl.value || "").trim().toLowerCase();
+
+    return rows.filter(r => {
+      if (t && String(r.type || "").toLowerCase() !== t) return false;
+      if (!q) return true;
+      return normalizeText(r).includes(q);
+    });
+  }
+
+  function render() {
+    const cols = getColumns();
+    renderHeader(cols);
+
+    const filtered = filterRows(items);
+    const sorted = sortRows(filtered);
+
+    statusEl.textContent = `${sorted.length} / ${items.length}`;
+
+    const rowsHtml = sorted.map(row => {
+      const tds = cols.map(k => {
+        const v = cell(row?.[k]);
+        return `<td style="padding:10px; vertical-align:top;
+                           border-bottom:1px solid rgba(255,255,255,.06);
+                           max-width:520px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(v)}</td>`;
+      }).join("");
+      return `<tr>${tds}</tr>`;
+    }).join("");
+
+    tbody.innerHTML = rowsHtml || `<tr><td style="padding:10px;">No data.</td></tr>`;
+  }
+
+  async function load() {
+    statusEl.textContent = "Loading…";
+    tbody.innerHTML = "";
+    try {
+      const res = await fetch("/items");
+      const j = await res.json();
+      if (!res.ok || !j?.ok) throw new Error(j?.error || ("HTTP " + res.status));
+      items = Array.isArray(j.items) ? j.items : [];
+      render();
+      statusEl.textContent = `${items.length} loaded`;
+    } catch (e) {
+      statusEl.textContent = "Error: " + (e?.message || e);
+      tbody.innerHTML = `<tr><td style="padding:10px;">Failed to load /items</td></tr>`;
+    }
+  }
+
+  qEl.addEventListener("input", () => render());
+  typeEl.addEventListener("change", () => render());
+  reloadBtn.addEventListener("click", () => load());
+
+  load();
+})();
+</script>
+</body>
+</html>
