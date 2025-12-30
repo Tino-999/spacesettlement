@@ -1,5 +1,5 @@
 // editor.js (FULL)
-// Usage: /admin.html?api=https://<your-worker>.workers.dev
+// /admin?api=https://<your-worker>.workers.dev
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,6 +22,9 @@ let latestBookSuggestions = [];
 let lastBookQuery = "";
 let lastBookFacts = null;
 
+// Cache for published items (id -> item)
+let publishedCache = new Map();
+
 // -------------------------
 // Helpers
 // -------------------------
@@ -29,11 +32,6 @@ const normalizeType = (t) => {
   const s = String(t || "").trim().toLowerCase();
   if (s === "books") return "book";
   if (s === "people") return "person";
-  if (s === "projects") return "project";
-  if (s === "orgs") return "org";
-  if (s === "topics") return "topic";
-  if (s === "concepts") return "concept";
-  if (s === "movies") return "movie";
   return s;
 };
 
@@ -47,11 +45,13 @@ function setValue(id, v) {
   if (!el) return;
   el.value = v == null ? "" : String(v);
 }
+
 function setOutput(objOrText) {
   const out = $("output");
   if (!out) return;
   out.textContent = typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
 }
+
 async function safeReadJson(res) {
   const text = await res.text();
   try {
@@ -59,14 +59,6 @@ async function safeReadJson(res) {
   } catch {
     return { ok: false, raw: text };
   }
-}
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 function requireAdminToken(actionLabel = "Aktion") {
@@ -79,13 +71,21 @@ function requireAdminToken(actionLabel = "Aktion") {
   return token || "";
 }
 
-function isBookType() {
-  return normalizeType(getValue("type")) === "book";
+function showFieldsForType(type) {
+  const t = normalizeType(type);
+  const person = $("personFields");
+  const book = $("bookFields");
+  if (person) person.style.display = t === "person" ? "block" : "none";
+  if (book) book.style.display = t === "book" ? "block" : "none";
+
+  // First publish year field is book-only (if present)
+  const fpy = $("firstPublishYear");
+  if (fpy) {
+    const container = fpy.closest(".field") || fpy.parentElement;
+    if (container) container.style.display = t === "book" ? "block" : "none";
+  }
 }
 
-// -------------------------
-// Build item from form
-// -------------------------
 function buildItem() {
   const type = normalizeType(getValue("type"));
   const title = getValue("title");
@@ -103,33 +103,9 @@ function buildItem() {
     meta: null,
   };
 
-  // person meta (optional)
-  if (type === "person") {
-    const meta = {};
-    const birthYear = Number(getValue("birthYear")) || null;
-    const deathYear = Number(getValue("deathYear")) || null;
-    const nationality = getValue("nationality");
-    const affiliations = getValue("affiliations");
-    const fields = getValue("fields");
-    const roles = getValue("roles");
-    const activeStartYear = Number(getValue("activeStartYear")) || null;
-    const activeEndYear = Number(getValue("activeEndYear")) || null;
-
-    if (birthYear) meta.birthYear = birthYear;
-    if (deathYear) meta.deathYear = deathYear;
-    if (nationality) meta.nationality = nationality.split(",").map((s) => s.trim()).filter(Boolean);
-    if (affiliations) meta.affiliations = affiliations.split(",").map((s) => s.trim()).filter(Boolean);
-    if (fields) meta.fields = fields.split(",").map((s) => s.trim()).filter(Boolean);
-    if (roles) meta.roles = roles.split(",").map((s) => s.trim()).filter(Boolean);
-    if (activeStartYear) meta.activeStartYear = activeStartYear;
-    if (activeEndYear) meta.activeEndYear = activeEndYear;
-
-    item.meta = Object.keys(meta).length ? meta : null;
-  }
-
-  // book meta
   if (type === "book") {
     const meta = {};
+
     const authors = getValue("authors")
       .split(",")
       .map((s) => s.trim())
@@ -154,61 +130,48 @@ function buildItem() {
     item.meta = Object.keys(meta).length ? meta : null;
   }
 
+  if (type === "person") {
+    const meta = {};
+    const birthYear = Number(getValue("birthYear")) || null;
+    const deathYear = Number(getValue("deathYear")) || null;
+
+    const nationality = getValue("nationality")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const affiliations = getValue("affiliations")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const fields = getValue("fields")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const roles = getValue("roles")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const activeStartYear = Number(getValue("activeStartYear")) || null;
+    const activeEndYear = Number(getValue("activeEndYear")) || null;
+
+    if (birthYear) meta.birthYear = birthYear;
+    if (deathYear) meta.deathYear = deathYear;
+    if (nationality.length) meta.nationality = nationality;
+    if (affiliations.length) meta.affiliations = affiliations;
+    if (fields.length) meta.fields = fields;
+    if (roles.length) meta.roles = roles;
+    if (activeStartYear) meta.activeStartYear = activeStartYear;
+    if (activeEndYear) meta.activeEndYear = activeEndYear;
+
+    item.meta = Object.keys(meta).length ? meta : null;
+  }
+
   return item;
 }
 
 // -------------------------
-// Fill form from an item (LOAD)
-// -------------------------
-function fillFormFromItem(it) {
-  if (!it) return;
-
-  setValue("type", normalizeType(it.type));
-  setValue("title", it.title || "");
-  setValue("href", it.href || "");
-  setValue("imageUrl", it.imageUrl || "");
-  setValue("summary", it.summary || "");
-  setValue("tags", Array.isArray(it.tags) ? it.tags.join(", ") : "");
-
-  const meta = it.meta && typeof it.meta === "object" ? it.meta : null;
-
-  // clear all optional fields first
-  [
-    "authors","publishedYear","firstPublishYear","publisher","isbn","language",
-    "birthYear","deathYear","nationality","affiliations","fields","roles","activeStartYear","activeEndYear",
-  ].forEach((id) => setValue(id, ""));
-
-  if (normalizeType(it.type) === "book" && meta) {
-    if (Array.isArray(meta.authors)) setValue("authors", meta.authors.join(", "));
-    if (typeof meta.publishedYear === "number") setValue("publishedYear", meta.publishedYear);
-    if (typeof meta.firstPublishYear === "number") setValue("firstPublishYear", meta.firstPublishYear);
-    if (meta.publisher) setValue("publisher", meta.publisher);
-    if (meta.isbn) setValue("isbn", meta.isbn);
-    if (meta.language) setValue("language", meta.language);
-
-    lastBookFacts = {
-      openLibraryId: meta.openLibraryId || null,
-      wikipediaUrl: meta.wikipediaUrl || null,
-    };
-  }
-
-  if (normalizeType(it.type) === "person" && meta) {
-    if (typeof meta.birthYear === "number") setValue("birthYear", meta.birthYear);
-    if (typeof meta.deathYear === "number") setValue("deathYear", meta.deathYear);
-    if (Array.isArray(meta.nationality)) setValue("nationality", meta.nationality.join(", "));
-    if (Array.isArray(meta.affiliations)) setValue("affiliations", meta.affiliations.join(", "));
-    if (Array.isArray(meta.fields)) setValue("fields", meta.fields.join(", "));
-    if (Array.isArray(meta.roles)) setValue("roles", meta.roles.join(", "));
-    if (typeof meta.activeStartYear === "number") setValue("activeStartYear", meta.activeStartYear);
-    if (typeof meta.activeEndYear === "number") setValue("activeEndYear", meta.activeEndYear);
-  }
-
-  setOutput({ ok: true, loaded: it });
-  updateTypeVisibility();
-}
-
-// -------------------------
-// Upload image (R2)
+// Upload image
 // -------------------------
 async function uploadImageToR2() {
   const fileInput = $("imageFile");
@@ -298,14 +261,16 @@ async function publishItem() {
 }
 
 // -------------------------
-// Delete (ADMIN)
+// Delete
 // -------------------------
-async function deleteItem(id) {
+async function deleteItemById(id) {
   const token = requireAdminToken("Delete");
   if (!token) return setOutput("Delete abgebrochen (kein Token).");
-  if (!id) return setOutput("Delete Fehler: missing id.");
 
-  if (!confirm("Wirklich löschen?")) return;
+  if (!id) return setOutput("Delete Fehler: missing id");
+
+  const ok = confirm("Wirklich löschen?");
+  if (!ok) return;
 
   setOutput(`Deleting…\nDELETE ${ITEMS_URL}?id=${encodeURIComponent(id)}`);
 
@@ -334,7 +299,56 @@ async function deleteItem(id) {
 }
 
 // -------------------------
-// List published (with LOAD/DELETE)
+// Load into form (for editing / re-publish as new item)
+// -------------------------
+function loadItemIntoForm(item) {
+  if (!item) return;
+
+  // base fields
+  setValue("type", normalizeType(item.type));
+  showFieldsForType(item.type);
+
+  setValue("title", item.title || "");
+  setValue("href", item.href || "");
+  setValue("imageUrl", item.imageUrl || "");
+  setValue("summary", item.summary || "");
+  setValue("tags", Array.isArray(item.tags) ? item.tags.join(", ") : (item.tags || ""));
+
+  // reset type-specific fields
+  const t = normalizeType(item.type);
+  if (t === "book") {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+
+    setValue("authors", Array.isArray(meta.authors) ? meta.authors.join(", ") : "");
+    setValue("publishedYear", meta.publishedYear ?? "");
+    setValue("firstPublishYear", meta.firstPublishYear ?? "");
+    setValue("publisher", meta.publisher ?? "");
+    setValue("isbn", meta.isbn ?? "");
+    setValue("language", meta.language ?? "");
+
+    // keep lastBookFacts minimal so publish preserves openLibraryId/wiki
+    lastBookFacts = {
+      openLibraryId: meta.openLibraryId || null,
+      wikipediaUrl: meta.wikipediaUrl || null,
+    };
+  } else if (t === "person") {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : {};
+    setValue("birthYear", meta.birthYear ?? "");
+    setValue("deathYear", meta.deathYear ?? "");
+    setValue("nationality", Array.isArray(meta.nationality) ? meta.nationality.join(", ") : "");
+    setValue("affiliations", Array.isArray(meta.affiliations) ? meta.affiliations.join(", ") : "");
+    setValue("fields", Array.isArray(meta.fields) ? meta.fields.join(", ") : "");
+    setValue("roles", Array.isArray(meta.roles) ? meta.roles.join(", ") : "");
+    setValue("activeStartYear", meta.activeStartYear ?? "");
+    setValue("activeEndYear", meta.activeEndYear ?? "");
+  }
+
+  // Show user what was loaded (including id)
+  setOutput({ loaded: item });
+}
+
+// -------------------------
+// List published (WITH Load/Delete buttons again)
 // -------------------------
 async function loadPublished() {
   if (!publishedEl) return;
@@ -348,74 +362,79 @@ async function loadPublished() {
     }
 
     const items = parsed.json?.items || [];
+    publishedCache = new Map(items.map((it) => [it.id, it]));
+
     publishedEl.innerHTML = "";
 
-    // store items on element for quick load by id
-    publishedEl._itemsById = new Map(items.map((it) => [it.id, it]));
+    const ul = document.createElement("ul");
+    ul.style.listStyle = "none";
+    ul.style.padding = "0";
+    ul.style.margin = "0";
 
-    const wrap = document.createElement("div");
-    wrap.style.display = "grid";
-    wrap.style.gap = "8px";
-
-    items.slice(0, 300).forEach((it) => {
-      const row = document.createElement("div");
-      row.style.display = "grid";
-      row.style.gridTemplateColumns = "1fr auto auto";
-      row.style.gap = "10px";
-      row.style.alignItems = "center";
-      row.style.padding = "8px 10px";
-      row.style.borderBottom = "1px solid rgba(255,255,255,0.08)";
+    items.slice(0, 250).forEach((it) => {
+      const li = document.createElement("li");
+      li.style.padding = "10px 0";
+      li.style.borderBottom = "1px solid rgba(255,255,255,0.08)";
+      li.style.display = "flex";
+      li.style.alignItems = "center";
+      li.style.justifyContent = "space-between";
+      li.style.gap = "12px";
 
       const left = document.createElement("div");
-      left.innerHTML = `<div style="font-weight:600">${escapeHtml(it.type)} · ${escapeHtml(it.title)}</div>
-        <div style="opacity:.7; font-size:12px">${escapeHtml(it.id)}</div>`;
+      left.style.minWidth = "0";
+
+      const t = document.createElement("div");
+      t.textContent = `${normalizeType(it.type)} · ${it.title}`;
+      t.style.fontWeight = "600";
+      t.style.whiteSpace = "nowrap";
+      t.style.overflow = "hidden";
+      t.style.textOverflow = "ellipsis";
+
+      const small = document.createElement("div");
+      small.textContent = it.id ? `id: ${it.id}` : "";
+      small.style.opacity = "0.65";
+      small.style.fontSize = "12px";
+      small.style.marginTop = "2px";
+
+      left.appendChild(t);
+      left.appendChild(small);
+
+      const right = document.createElement("div");
+      right.style.display = "flex";
+      right.style.gap = "8px";
+      right.style.flexShrink = "0";
 
       const btnLoad = document.createElement("button");
-      btnLoad.className = "btn btn--ghost";
       btnLoad.type = "button";
+      btnLoad.className = "btn btn--ghost";
       btnLoad.textContent = "Load";
-      btnLoad.dataset.loadId = it.id;
+      btnLoad.addEventListener("click", () => loadItemIntoForm(it));
 
       const btnDel = document.createElement("button");
-      btnDel.className = "btn btn--ghost";
       btnDel.type = "button";
+      btnDel.className = "btn";
       btnDel.textContent = "Delete";
-      btnDel.dataset.delId = it.id;
+      btnDel.addEventListener("click", () => deleteItemById(it.id));
 
-      row.appendChild(left);
-      row.appendChild(btnLoad);
-      row.appendChild(btnDel);
-      wrap.appendChild(row);
+      right.appendChild(btnLoad);
+      right.appendChild(btnDel);
+
+      li.appendChild(left);
+      li.appendChild(right);
+      ul.appendChild(li);
     });
 
-    publishedEl.appendChild(wrap);
+    publishedEl.appendChild(ul);
   } catch (e) {
     publishedEl.textContent = "Load Fehler: " + (e?.message || e);
   }
 }
 
-// Click delegation for LOAD/DELETE
-publishedEl?.addEventListener("click", (ev) => {
-  const t = ev.target;
-  if (!(t instanceof HTMLElement)) return;
-
-  const loadId = t.dataset?.loadId;
-  const delId = t.dataset?.delId;
-
-  if (loadId && publishedEl?._itemsById?.has(loadId)) {
-    const it = publishedEl._itemsById.get(loadId);
-    fillFormFromItem(it);
-    return;
-  }
-
-  if (delId) {
-    deleteItem(delId).catch((e) => setOutput(e?.message || e));
-  }
-});
-
 // -------------------------
 // Books: Suggest + Autofill
 // -------------------------
+const isBookType = () => normalizeType(getValue("type")) === "book";
+
 async function fetchBookSuggestions(q) {
   const res = await fetch(`${BOOK_SUGGEST_URL}?q=${encodeURIComponent(q)}`);
   const parsed = await safeReadJson(res);
@@ -454,15 +473,12 @@ function pickBestBookSuggestion(titleText) {
   const t = String(titleText || "").trim().toLowerCase();
   if (!latestBookSuggestions.length) return null;
 
-  // 1) prefer mapped original (worker marks it)
   const mapped = latestBookSuggestions.find((s) => s && s.mappedFromGermanTitle === true);
   if (mapped) return mapped;
 
-  // 2) exact match
-  const exact = latestBookSuggestions.find((s) => String(s.title || "").trim().toLowerCase() === t);
+  const exact = latestBookSuggestions.find((s) => String(s.title || "").toLowerCase() === t);
   if (exact) return exact;
 
-  // 3) fallback: first
   return latestBookSuggestions[0];
 }
 
@@ -482,26 +498,23 @@ async function runBookAutofill() {
     const facts = await booksAutofillFacts(match.openLibraryId);
     lastBookFacts = facts;
 
-    // Work title/authors (original)
     if (facts.title) setValue("title", facts.title);
     if (Array.isArray(facts.authors)) setValue("authors", facts.authors.join(", "));
 
-    // Concrete edition
     if (facts.publishedYear) setValue("publishedYear", facts.publishedYear);
     if (facts.publisher) setValue("publisher", facts.publisher);
     if (facts.isbn) setValue("isbn", facts.isbn);
     if (facts.language) setValue("language", facts.language);
 
-    // Original first publish year (separately)
     if (facts.firstPublishYear) setValue("firstPublishYear", facts.firstPublishYear);
 
-    // Wikipedia best effort
     if (facts.wikipediaUrl) setValue("href", facts.wikipediaUrl);
 
-    // Cover auto
     if (facts.coverUrl) {
       const cur = getValue("imageUrl");
-      if (!cur || cur.includes("assets/") || cur.includes("...")) setValue("imageUrl", facts.coverUrl);
+      if (!cur || cur.includes("assets/img/") || cur.includes("...images/file")) {
+        setValue("imageUrl", facts.coverUrl);
+      }
     }
 
     setOutput("Autofill läuft… (AI summary/tags)");
@@ -522,7 +535,14 @@ async function runBookAutofill() {
   }
 }
 
-// Live suggestions for books (datalist)
+// -------------------------
+// Event wiring
+// -------------------------
+$("type")?.addEventListener("change", () => {
+  showFieldsForType(getValue("type"));
+});
+
+// Live suggestions (book titles)
 $("title")?.addEventListener("input", async () => {
   if (!isBookType()) return;
 
@@ -552,24 +572,6 @@ $("title")?.addEventListener("input", async () => {
   });
 });
 
-// -------------------------
-// Type switching: show/hide field groups
-// -------------------------
-function updateTypeVisibility() {
-  const t = normalizeType(getValue("type"));
-  const personFields = $("personFields");
-  const bookFields = $("bookFields");
-  if (personFields) personFields.style.display = t === "person" ? "" : "none";
-  if (bookFields) bookFields.style.display = t === "book" ? "" : "none";
-}
-
-$("type")?.addEventListener("change", () => {
-  updateTypeVisibility();
-  latestBookSuggestions = [];
-  lastBookQuery = "";
-  lastBookFacts = null;
-});
-
 // Buttons
 $("generate")?.addEventListener("click", (e) => {
   e.preventDefault();
@@ -581,18 +583,18 @@ $("publish")?.addEventListener("click", (e) => {
 });
 $("refreshList")?.addEventListener("click", (e) => {
   e.preventDefault();
-  loadPublished().catch((err) => setOutput(err?.message || err));
+  loadPublished().catch(console.error);
 });
 $("uploadImage")?.addEventListener("click", (e) => {
   e.preventDefault();
-  uploadImageToR2().catch((err) => setOutput(err?.message || err));
+  uploadImageToR2().catch(console.error);
 });
 $("autofill")?.addEventListener("click", (e) => {
   e.preventDefault();
-  if (isBookType()) runBookAutofill();
-  else setOutput("Auto-Fill ist aktuell nur für book aktiv.");
+  runBookAutofill();
 });
 
-updateTypeVisibility();
+// Init
+showFieldsForType(getValue("type"));
 loadPublished().catch(console.error);
 setOutput(`Editor loaded.\nAPI: ${WORKER_BASE}`);
