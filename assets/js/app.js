@@ -148,9 +148,27 @@ function setActiveChip(filter) {
   });
 }
 
+function normalizeTypeForFilter(type) {
+  const t = String(type || "").toLowerCase();
+
+  const map = {
+    book: "books",
+    person: "people",
+    project: "projects",
+    concept: "concepts",
+    organization: "orgs",
+    topic: "topics",
+    movie: "movies",
+  };
+
+  return map[t] || t;
+}
+
 function passesFilter(item, q, filter) {
-  const type = String(item.type ?? "").toLowerCase();
+  const type = normalizeTypeForFilter(item.type);
+
   if (filter !== "all" && type !== filter) return false;
+
   if (!q) return true;
 
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
@@ -160,7 +178,7 @@ function passesFilter(item, q, filter) {
     item.summary,
     item.href,
     ...(Array.isArray(item.tags) ? item.tags : []),
-    item.type,
+    type,
     meta ? JSON.stringify(meta) : "",
   ]
     .map(normalizeText)
@@ -168,6 +186,7 @@ function passesFilter(item, q, filter) {
 
   return hay.includes(q);
 }
+
 
 function sortItemsByYear(items) {
   return [...items].sort((a, b) => {
