@@ -1,20 +1,39 @@
+async function loadApiBase() {
+  // 1) URL-Override per ?api=
+  const params = new URLSearchParams(location.search);
+  const apiParam = params.get("api");
+  if (apiParam) return apiParam.replace(/\/+$/, "");
+
+  // 2) data/config.json
+  try {
+    const res = await fetch("data/config.json", { cache: "no-store" });
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg && typeof cfg.apiBase === "string" && cfg.apiBase.trim()) {
+        return cfg.apiBase.trim().replace(/\/+$/, "");
+      }
+    }
+  } catch (_) {}
+
+  // 3) Fallback
+  return "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
+}
+
+
 // editor.js (FULL)
 // /admin?api=https://<your-worker>.workers.dev
 
 const $ = (id) => document.getElementById(id);
 
-const DEFAULT_WORKER_BASE = "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
-const WORKER_BASE = (() => {
-  const p = new URLSearchParams(location.search);
-  const api = (p.get("api") || "").trim();
-  return (api || DEFAULT_WORKER_BASE).replace(/\/+$/, "");
-})();
+let DEFAULT_WORKER_BASE = "";
+let WORKER_BASE = "";
 
-const ITEMS_URL = `${WORKER_BASE}/items`;
-const UPLOAD_URL = `${WORKER_BASE}/upload-image`;
-const BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest`;
-const BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
-const BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
+
+let ITEMS_URL = "";
+let UPLOAD_URL = "";
+let BOOK_SUGGEST_URL = "";
+let BOOK_AUTOFILL_URL = "";
+let BOOK_ENRICH_URL = "";
 
 const publishedEl = $("published");
 
@@ -598,3 +617,20 @@ $("autofill")?.addEventListener("click", (e) => {
 showFieldsForType(getValue("type"));
 loadPublished().catch(console.error);
 setOutput(`Editor loaded.\nAPI: ${WORKER_BASE}`);
+
+async function init() {
+  // apiBase aus ?api= oder data/config.json oder Fallback
+  DEFAULT_WORKER_BASE = await loadApiBase();
+  WORKER_BASE = DEFAULT_WORKER_BASE;
+
+  // abgeleitete Endpunkte erst jetzt setzen
+  ITEMS_URL = `${WORKER_BASE}/items`;
+  UPLOAD_URL = `${WORKER_BASE}/upload-image`;
+  BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest`;
+  BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
+  BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  init().catch((e) => setOutput(String(e?.message || e)));
+});

@@ -1,3 +1,25 @@
+async function loadApiBase() {
+  // 1) URL-Override per ?api=
+  const params = new URLSearchParams(location.search);
+  const apiParam = params.get("api");
+  if (apiParam) return apiParam.replace(/\/+$/, "");
+
+  // 2) data/config.json
+  try {
+    const res = await fetch("data/config.json", { cache: "no-store" });
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg && typeof cfg.apiBase === "string" && cfg.apiBase.trim()) {
+        return cfg.apiBase.trim().replace(/\/+$/, "");
+      }
+    }
+  } catch (_) {}
+
+  // 3) Fallback (bestehende Prod-URL)
+  return "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
+}
+
+
 // assets/js/app.js
 // Loads items from Cloudflare Worker /items (D1) and renders cards.
 // Search + type filter (chips).
@@ -7,9 +29,9 @@
 // - No per-card / per-book dust canvases anymore (prevents seams + blocks)
 // - Canvas is injected automatically if not present in HTML
 
-const WORKER_BASE =
-  "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
-const ITEMS_URL = `${WORKER_BASE}/items`;
+let WORKER_BASE = "";
+
+let ITEMS_URL = "";
 
 const els = {
   q: document.getElementById("q"),
@@ -132,9 +154,16 @@ async function loadItems() {
   const res = await fetch(ITEMS_URL, { cache: "no-store" });
   const data = await res.json();
 
+  // Worker kann direkt ein Array liefern
+  if (Array.isArray(data)) {
+    return data.map(normalizeItem);
+  }
+
+  // Alternativ: API liefert { items: [...] }
   if (data && typeof data === "object" && Array.isArray(data.items)) {
     return data.items.map(normalizeItem);
   }
+
   return [];
 }
 
@@ -504,6 +533,8 @@ function applyAndRender() {
 }
 
 async function init() {
+  WORKER_BASE = await loadApiBase();
+  ITEMS_URL = `${WORKER_BASE}/items`;
   if (els.year) els.year.textContent = String(new Date().getFullYear());
 
   // Start global background dust once
