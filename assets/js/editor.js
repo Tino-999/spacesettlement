@@ -103,11 +103,36 @@ function showFieldsForType(type) {
     const container = fpy.closest(".field") || fpy.parentElement;
     if (container) container.style.display = t === "book" ? "block" : "none";
   }
+    // Clear class/group fields when they do not apply
+  if (t !== "project") {
+    const pc = $("projectClass");
+    if (pc) pc.value = "";
+    const chips = $("projectClassChips");
+    chips?.querySelectorAll("button").forEach(b => b.classList.remove("is-active", "active"));
+  }
+
+  if (t !== "fiction") {
+    const fc = $("fictionClass");
+    if (fc) fc.value = "";
+    const chips = $("fictionClassChips");
+    chips?.querySelectorAll("button").forEach(b => b.classList.remove("is-active", "active"));
+  }
+
+  if (t !== "topic") {
+    const tg = $("topicGroup");
+    if (tg) tg.value = "";
+    const chips = $("topicGroupChips");
+    chips?.querySelectorAll("button").forEach(b => b.classList.remove("is-active", "active"));
+  }
+
 }
 
 function buildItem() {
   const type = normalizeType(getValue("type"));
   const title = getValue("title");
+  const projectClass = getValue("projectClass"); // hidden input
+  const fictionClass = getValue("fictionClass"); // hidden input
+  const topicGroup = getValue("topicGroup");     // hidden input
 
   const item = {
     type,
@@ -120,7 +145,25 @@ function buildItem() {
       .map((s) => s.trim())
       .filter(Boolean),
     meta: null,
+    project_class: null,
+    fiction_class: null,
   };
+
+    if (type === "project") {
+    item.project_class = projectClass || null;
+  }
+
+  if (type === "fiction") {
+    item.fiction_class = fictionClass || null;
+  }
+
+  if (type === "topic") {
+    // Für Topic reicht bei dir die Gruppierung (LAW / RELIGION / SETTLEMENT ARCHITECTURES).
+    // Wir speichern sie in meta, ohne das DB-Schema zu erweitern.
+    item.meta = item.meta || {};
+    item.meta.topicGroup = topicGroup || null;
+  }
+
 
   if (type === "book") {
     const meta = {};
