@@ -99,6 +99,22 @@ TOPICS besitzen keine Klassen.
 
 ## Datenmodell (Kurzfassung)
 
+### D1 – Tabelle `items` (relevante Facettenfelder)
+
+- `project_class` (TEXT, NULL)
+  - Gültig für Typ `PROJECT`
+  - Wertebereich: CLASS I–V (gemäß Abschnitt „PROJECTS – Klassifikation I–V“)
+
+- `fiction_class` (TEXT, NULL)
+  - Gültig für Typ `FICTION`
+  - Wertebereich: CLASS A–D (gemäß Abschnitt „FICTION – Klassifikation A–D“)
+
+- `topics` (TEXT, NULL)
+  - Gültig für Typ `TOPIC`
+  - Wertebereich: Topic-Cluster (Settlement Architectures, Law, Religion)
+  - Speicherformat ist nicht festgelegt
+
+
 - Cloudflare D1 (SQLite)
 - Tabelle `items` als zentrales Objekt
 - Klassen als **Facetten**, nicht als Typen
