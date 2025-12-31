@@ -42,6 +42,8 @@ const els = {
 
 let allItems = [];
 let activeFilter = "all";
+let activeProjectClass = null; // "I".."V"
+let activeFictionClass = null; // "A".."D"
 
 /* ---------------- helpers ---------------- */
 
@@ -160,8 +162,44 @@ function updateSubfilters(filter) {
 
 /* ---------------- data ---------------- */
 
+function buildItemsUrl() {
+  const url = new URL(ITEMS_URL);
+
+  // type → API erwartet singular: project, fiction, org, person, topic, book, movie
+  const filter = String(activeFilter || "all").toLowerCase();
+
+  const typeMap = {
+    projects: "project",
+    fiction: "fiction",
+    orgs: "org",
+    people: "person",
+    topics: "topic",
+    books: "book",
+    movies: "movie",
+  };
+
+  if (filter !== "all" && typeMap[filter]) {
+    url.searchParams.set("type", typeMap[filter]);
+  }
+
+  if (filter === "projects" && activeProjectClass) {
+    url.searchParams.set("project_class", activeProjectClass);
+  }
+
+  if (filter === "fiction" && activeFictionClass) {
+    url.searchParams.set("fiction_class", activeFictionClass);
+  }
+
+  // TOPICS-Unterfilter (Law/Religion/Settlement Architectures) existiert im UI als Chip-Filter bereits.
+  // Wenn du ein separates UI-Element hast, binden wir es im nächsten Schritt an `topic`.
+  // Vorerst: kein topic param, da kein Topic-Selector im Code gezeigt wurde.
+
+  return url.toString();
+}
+
+
 async function loadItems() {
-  const res = await fetch(ITEMS_URL, { cache: "no-store" });
+  const res = await fetch(buildItemsUrl(), { cache: "no-store" });
   const data = await res.json();
 
   // Worker kann direkt ein Array liefern
@@ -572,11 +610,30 @@ async function init() {
   allItems = sortItemsByYear(allItems);
 
 els.chips.forEach((btn) => {
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
     const nextFilter = btn.dataset.filter || "all";
     setActiveChip(nextFilter);
     updateSubfilters(nextFilter);
+    els.chips.forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const nextFilter = btn.dataset.filter || "all";
+    setActiveChip(nextFilter);
+    updateSubfilters(nextFilter);
+
+    // Step 5.3c – Subfilter reset
+    if (nextFilter !== "projects") activeProjectClass = null;
+    if (nextFilter !== "fiction") activeFictionClass = null;
+
+    allItems = await loadItems();
+    allItems = sortItemsByYear(allItems);
     applyAndRender();
+  });
+});
+
+    allItems = await loadItems();
+allItems = sortItemsByYear(allItems);
+applyAndRender();
+
     });
   });
 
