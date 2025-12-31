@@ -86,6 +86,18 @@ Neue Spalten (additiv, Schritt 2):
 - Keine Breaking Changes.
 
 
+### Schritt 4 – Datenpflege / Backfill
+
+- Backfill bewusst manuell durchgeführt.
+- Betroffen:
+  - PROJECTS:
+    - The Mars Project → CLASS I
+    - starship → CLASS II
+- Umsetzung per explizitem SQL-UPDATE (remote).
+- Kein automatischer oder heuristischer Backfill.
+- Weitere Felder (FICTION, TOPICS) aktuell nicht gepflegt.
+
+
 
 ### Versionskontrolle
 - Repository: `spacesettlement`

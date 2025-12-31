@@ -58,6 +58,14 @@ Aktueller Stand:
 - Response additiv erweitert (`project_class`, `fiction_class`, `topics`).
 - Lokale Tests und Remote Smoke-Checks erfolgreich.
 
+## Schritt 4 abgeschlossen
+
+- Bedarf für Backfill identifiziert.
+- Manuelles Backfill-Skript angelegt (nicht automatisch ausgeführt).
+- PROJECTS-Klassen explizit gesetzt:
+  - The Mars Project → CLASS I
+  - starship → CLASS II
+- Änderungen remote verifiziert.
 
 
 
