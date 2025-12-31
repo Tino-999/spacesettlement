@@ -148,6 +148,16 @@ function resolveImagePath(item) {
   return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
 }
 
+function updateSubfilters(filter) {
+  const projectClasses = document.getElementById("project-classes");
+  const fictionClasses = document.getElementById("fiction-classes");
+  if (!projectClasses || !fictionClasses) return;
+
+  projectClasses.hidden = filter !== "projects";
+  fictionClasses.hidden = filter !== "fiction";
+}
+
+
 /* ---------------- data ---------------- */
 
 async function loadItems() {
@@ -561,16 +571,19 @@ async function init() {
 
   allItems = sortItemsByYear(allItems);
 
-  els.chips.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setActiveChip(btn.dataset.filter || "all");
-      applyAndRender();
+els.chips.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const nextFilter = btn.dataset.filter || "all";
+    setActiveChip(nextFilter);
+    updateSubfilters(nextFilter);
+    applyAndRender();
     });
   });
 
   els.q?.addEventListener("input", () => applyAndRender());
 
   setActiveChip("all");
+  updateSubfilters("all");
   applyAndRender();
 }
 
