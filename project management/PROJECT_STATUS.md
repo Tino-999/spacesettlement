@@ -72,6 +72,20 @@ Neue Spalten (additiv, Schritt 2):
 - `fiction_class` (TEXT, NULL) – FICTION: CLASS A–D
 - `topics` (TEXT, NULL) – TOPICS-Facette (Law, Religion, Settlement Architectures); Speicherformat noch nicht festgelegt
 
+### Backend / API (Schritt 3)
+
+- GET `/items` unterstützt optionale Filterparameter:
+  - `type`
+  - `project_class`
+  - `fiction_class`
+  - `topic`
+- Response enthält additiv:
+  - `project_class`
+  - `fiction_class`
+  - `topics`
+- Keine Breaking Changes.
+
+
 
 ### Versionskontrolle
 - Repository: `spacesettlement`

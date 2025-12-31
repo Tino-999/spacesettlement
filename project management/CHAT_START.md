@@ -50,6 +50,15 @@ Aktueller Stand:
 
 &nbsp; - Keine Optikänderung
 
+## Schritt 2 abgeschlossen
+
+## Schritt 3 abgeschlossen
+
+- Backend: GET `/items` Filter additiv ergänzt (`type`, `project_class`, `fiction_class`, `topic`).
+- Response additiv erweitert (`project_class`, `fiction_class`, `topics`).
+- Lokale Tests und Remote Smoke-Checks erfolgreich.
+
+
 
 
 Aktueller Navigationsbaum:
