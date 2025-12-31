@@ -151,6 +151,22 @@ Client-side search remains post-fetch only.
 No design changes.
 No schema changes.
 
+### Classes and Faceted Filtering – Completed
+
+The SpaceSettlement library implements a strict separation of concerns:
+
+- PROJECTS: CLASS I–V (`project_class`)
+- FICTION: CLASS A–D (`fiction_class`)
+- TOPICS: string-based facets (`topics`)
+
+Filtering is performed server-side via the `/items` API endpoint.
+The frontend issues deterministic, parameterized queries and handles empty result sets gracefully.
+
+No automatic classification is used.
+All classifications are explicit or left NULL.
+
+This architecture is considered complete.
+
 
 
 ---

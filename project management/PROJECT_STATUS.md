@@ -120,6 +120,17 @@ No data migration performed in this step.
 - Sicherungstag: `pre-classes`
 
 ---
+### Classes & Fiction Refactor – Completed
+
+Status: ✅ Completed
+
+- D1 schema extended additively with class and topic facets.
+- Frontend filters fully bound to backend queries.
+- No speculative data inference.
+- No unresolved schema or API issues.
+
+The classes-and-fiction refactor is closed.
+
 
 ### Frontend (Stand nach Schritt 1.4)
 
