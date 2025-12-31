@@ -120,6 +120,21 @@ TOPICS besitzen keine Klassen.
 - Klassen als **Facetten**, nicht als Typen
 - Änderungen erfolgen **additiv**
 
+### API: GET /items (Query-Parameter)
+
+- `type` (optional)
+  - Filtert nach `items.type`.
+
+- `project_class` (optional)
+  - Filtert nach `items.project_class`.
+
+- `fiction_class` (optional)
+  - Filtert nach `items.fiction_class`.
+
+- `topic` (optional)
+  - Filtert über `items.topics` (String-Match).
+
+
 ---
 
 ## UI-Prinzipien
