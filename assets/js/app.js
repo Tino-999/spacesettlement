@@ -44,6 +44,8 @@ let allItems = [];
 let activeFilter = "all";
 let activeProjectClass = null; // "I".."V"
 let activeFictionClass = null; // "A".."D"
+let activeTopic = null; // "Law" | "Religion" | "Settlement Architectures"
+
 
 /* ---------------- helpers ---------------- */
 
@@ -153,11 +155,13 @@ function resolveImagePath(item) {
 function updateSubfilters(filter) {
   const projectClasses = document.getElementById("project-classes");
   const fictionClasses = document.getElementById("fiction-classes");
-  if (!projectClasses || !fictionClasses) return;
+  const topicClasses = document.getElementById("topic-classes");
 
-  projectClasses.hidden = filter !== "projects";
-  fictionClasses.hidden = filter !== "fiction";
+  if (projectClasses) projectClasses.hidden = filter !== "projects";
+  if (fictionClasses) fictionClasses.hidden = filter !== "fiction";
+  if (topicClasses) topicClasses.hidden = filter !== "topics";
 }
+
 
 
 /* ---------------- data ---------------- */
@@ -182,19 +186,19 @@ function buildItemsUrl() {
     url.searchParams.set("type", typeMap[filter]);
   }
 
-  if (filter === "projects" && activeProjectClass) {
-    url.searchParams.set("project_class", activeProjectClass);
-  }
+if (filter === "projects" && activeProjectClass) {
+  url.searchParams.set("project_class", activeProjectClass);
+}
 
-  if (filter === "fiction" && activeFictionClass) {
-    url.searchParams.set("fiction_class", activeFictionClass);
-  }
+if (filter === "fiction" && activeFictionClass) {
+  url.searchParams.set("fiction_class", activeFictionClass);
+}
 
-  // TOPICS-Unterfilter (Law/Religion/Settlement Architectures) existiert im UI als Chip-Filter bereits.
-  // Wenn du ein separates UI-Element hast, binden wir es im nächsten Schritt an `topic`.
-  // Vorerst: kein topic param, da kein Topic-Selector im Code gezeigt wurde.
+if (filter === "topics" && activeTopic) {
+  url.searchParams.set("topic", activeTopic);
+}
 
-  return url.toString();
+return url.toString();
 }
 
 
