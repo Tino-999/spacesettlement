@@ -630,12 +630,6 @@ els.chips.forEach((btn) => {
   });
 });
 
-    allItems = await loadItems();
-allItems = sortItemsByYear(allItems);
-applyAndRender();
-
-    });
-  });
 
   els.q?.addEventListener("input", () => applyAndRender());
 
