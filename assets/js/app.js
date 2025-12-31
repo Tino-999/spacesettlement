@@ -618,15 +618,11 @@ els.chips.forEach((btn) => {
     const nextFilter = btn.dataset.filter || "all";
     setActiveChip(nextFilter);
     updateSubfilters(nextFilter);
-    els.chips.forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const nextFilter = btn.dataset.filter || "all";
-    setActiveChip(nextFilter);
-    updateSubfilters(nextFilter);
 
     // Step 5.3c – Subfilter reset
     if (nextFilter !== "projects") activeProjectClass = null;
     if (nextFilter !== "fiction") activeFictionClass = null;
+    if (nextFilter !== "topics") activeTopic = null;
 
     allItems = await loadItems();
     allItems = sortItemsByYear(allItems);
