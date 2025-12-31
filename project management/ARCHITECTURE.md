@@ -134,6 +134,24 @@ TOPICS besitzen keine Klassen.
 - `topic` (optional)
   - Filtert über `items.topics` (String-Match).
 
+### Step 5 – Frontend API Filter Integration
+
+The frontend library UI is now directly bound to the `/items` API endpoint.
+
+Filtering behavior:
+- Main filters (projects, fiction, topics, books, movies, people, orgs) trigger server-side filtering via query parameters.
+- Subfilters are implemented for:
+  - PROJECTS → `project_class` (CLASS I–V)
+  - FICTION → `fiction_class` (CLASS A–D)
+  - TOPICS → `topic` (Law, Religion, Settlement Architectures)
+
+Each filter change results in a new API request.
+Client-side search remains post-fetch only.
+
+No design changes.
+No schema changes.
+
+
 
 ---
 

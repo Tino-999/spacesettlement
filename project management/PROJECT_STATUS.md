@@ -97,6 +97,21 @@ Neue Spalten (additiv, Schritt 2):
 - Kein automatischer oder heuristischer Backfill.
 - Weitere Felder (FICTION, TOPICS) aktuell nicht gepflegt.
 
+### Step 5 – Frontend Filter Integration (Completed)
+
+Status: ✅ Completed
+
+- Frontend filters are fully connected to backend D1 queries.
+- `/items` endpoint supports:
+  - `type`
+  - `project_class`
+  - `fiction_class`
+  - `topic`
+- UI subfilters are conditionally displayed and correctly reset on filter change.
+- Configuration file `data/config.json` added and versioned.
+
+No breaking changes.
+No data migration performed in this step.
 
 
 ### Versionskontrolle

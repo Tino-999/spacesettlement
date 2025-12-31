@@ -67,6 +67,14 @@ Aktueller Stand:
   - starship → CLASS II
 - Änderungen remote verifiziert.
 
+2025-01-XX – Step 5 completed
+
+Frontend filtering logic finalized.
+Main filters and subfilters now generate server-side `/items` queries.
+Topics subfilters added (Law, Religion, Settlement Architectures).
+Configuration stabilized via versioned `data/config.json`.
+
+System ready for controlled backfill (Step 6).
 
 
 Aktueller Navigationsbaum:
