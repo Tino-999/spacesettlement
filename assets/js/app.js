@@ -248,7 +248,17 @@ function normalizeTypeForFilter(type) {
 function passesFilter(item, q, filter) {
   const type = normalizeTypeForFilter(item.type);
 
+  // Typ-Filter
   if (filter !== "all" && type !== filter) return false;
+
+  // Projektklassen-Filter
+  if (
+    type === "projects" &&
+    activeProjectClass !== "all" &&
+    item.project_class !== activeProjectClass
+  ) {
+    return false;
+  }
 
   if (!q) return true;
 
@@ -267,6 +277,7 @@ function passesFilter(item, q, filter) {
 
   return hay.includes(q);
 }
+
 
 
 function sortItemsByYear(items) {
