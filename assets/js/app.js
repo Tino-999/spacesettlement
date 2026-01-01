@@ -1,10 +1,24 @@
+// assets/js/app.js
+// Loads items from Cloudflare Worker /items (D1) and renders cards.
+// Search + type filter (chips) + subfilters:
+// - Projects: project_class (CLASS I–V)
+// - Fiction: fiction_class (CLASS A–D)
+// - Topics: meta.topicGroup (e.g., LAW / RELIGION / SETTLEMENT ARCHITECTURES)
+//
+// API base resolution:
+// 1) ?api= override
+// 2) data/config.json (apiBase)
+// 3) fallback staging worker
+
+/* ---------------- API base ---------------- */
+
 async function loadApiBase() {
-  // 1) URL-Override per ?api=
+  // 1) URL override
   const params = new URLSearchParams(location.search);
   const apiParam = params.get("api");
   if (apiParam) return apiParam.replace(/\/+$/, "");
 
-  // 2) data/config.json
+  // 2) data/config.json (optional)
   try {
     const res = await fetch("data/config.json", { cache: "no-store" });
     if (res.ok) {
@@ -15,37 +29,37 @@ async function loadApiBase() {
     }
   } catch (_) {}
 
-  // 3) Fallback (bestehende Prod-URL)
-  return "https://damp-sun-7c39spacesettlement-api.tinoschuldt100.workers.dev";
+  // 3) fallback (staging)
+  return "https://spacesettlement-api-staging.tinoschuldt100.workers.dev";
 }
 
-
-// assets/js/app.js
-// Loads items from Cloudflare Worker /items (D1) and renders cards.
-// Search + type filter (chips).
-// Sorts by sortYear (DESC), fallback title (ASC).
-//
-// Updated: Stardust is now a SINGLE global background canvas behind all tiles.
-// - No per-card / per-book dust canvases anymore (prevents seams + blocks)
-// - Canvas is injected automatically if not present in HTML
-
 let WORKER_BASE = "";
-
 let ITEMS_URL = "";
+
+/* ---------------- DOM ---------------- */
 
 const els = {
   q: document.getElementById("q"),
   cards: document.getElementById("cards"),
   year: document.getElementById("year"),
-  chips: Array.from(document.querySelectorAll(".chip[data-filter]")),
+  typeChips: Array.from(document.querySelectorAll(".chip[data-filter]")),
+
+  // Subfilter containers (hidden by default in HTML)
+  projectBox: document.getElementById("project-classes"),
+  fictionBox: document.getElementById("fiction-classes"),
+  topicBox: document.getElementById("topic-classes"),
+
+  // Subfilter chips
+  projectChips: Array.from(document.querySelectorAll(".chip[data-project-class]")),
+  fictionChips: Array.from(document.querySelectorAll(".chip[data-fiction-class]")),
+  topicChips: Array.from(document.querySelectorAll(".chip[data-topic]")),
 };
 
 let allItems = [];
-let activeFilter = "all";
-let activeProjectClass = null; // "I".."V"
-let activeFictionClass = null; // "A".."D"
-let activeTopic = null; // "Law" | "Religion" | "Settlement Architectures"
-
+let activeFilter = "all";            // type filter
+let activeProjectClass = "all";      // "CLASS I" .. "CLASS V"
+let activeFictionClass = "all";      // "CLASS A" .. "CLASS D"
+let activeTopicGroup = "all";        // "LAW" / "RELIGION" / "SETTLEMENT ARCHITECTURES"
 
 /* ---------------- helpers ---------------- */
 
@@ -66,6 +80,11 @@ function normalizeText(s) {
     .replace(/\p{Diacritic}/gu, "");
 }
 
+function normalizeGroupKey(s) {
+  // Robust match between "LAW" and "Law", "Settlement Architectures" and "SETTLEMENT ARCHITECTURES"
+  return normalizeText(s).replace(/\s+/g, " ").trim().toUpperCase();
+}
+
 function isLikelyUrlOrPath(s) {
   const v = String(s || "").trim();
   if (!v) return false;
@@ -84,16 +103,14 @@ function safeJsonParse(value) {
 }
 
 function normalizeTags(tags) {
-  if (Array.isArray(tags))
-    return tags.map(String).map((x) => x.trim()).filter(Boolean);
+  if (Array.isArray(tags)) return tags.map(String).map((x) => x.trim()).filter(Boolean);
 
   if (typeof tags === "string") {
     const t = tags.trim();
     if (!t) return [];
     try {
       const parsed = JSON.parse(t);
-      if (Array.isArray(parsed))
-        return parsed.map(String).map((x) => x.trim()).filter(Boolean);
+      if (Array.isArray(parsed)) return parsed.map(String).map((x) => x.trim()).filter(Boolean);
     } catch {}
     return t.split(",").map((x) => x.trim()).filter(Boolean);
   }
@@ -115,6 +132,10 @@ function normalizeItem(raw) {
   } else if (typeof it.sortYear !== "number") {
     it.sortYear = null;
   }
+
+  // Ensure known classification fields exist
+  if (typeof it.project_class !== "string") it.project_class = it.project_class ?? null;
+  if (typeof it.fiction_class !== "string") it.fiction_class = it.fiction_class ?? null;
 
   return it;
 }
@@ -138,6 +159,7 @@ function resolveImagePath(item) {
     topics: "topics",
     books: "books",
     movies: "movies",
+    fiction: "fiction",
 
     person: "people",
     project: "projects",
@@ -152,82 +174,27 @@ function resolveImagePath(item) {
   return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
 }
 
-function updateSubfilters(filter) {
-  const projectClasses = document.getElementById("project-classes");
-  const fictionClasses = document.getElementById("fiction-classes");
-  const topicClasses = document.getElementById("topic-classes");
-
-  if (projectClasses) projectClasses.hidden = filter !== "projects";
-  if (fictionClasses) fictionClasses.hidden = filter !== "fiction";
-  if (topicClasses) topicClasses.hidden = filter !== "topics";
-}
-
-
-
 /* ---------------- data ---------------- */
 
-function buildItemsUrl() {
-  const url = new URL(ITEMS_URL);
-
-  // type → API erwartet singular: project, fiction, org, person, topic, book, movie
-  const filter = String(activeFilter || "all").toLowerCase();
-
-  const typeMap = {
-    projects: "project",
-    fiction: "fiction",
-    orgs: "org",
-    people: "person",
-    topics: "topic",
-    books: "book",
-    movies: "movie",
-  };
-
-  if (filter !== "all" && typeMap[filter]) {
-    url.searchParams.set("type", typeMap[filter]);
+async function loadItems() {
+  if (!WORKER_BASE) {
+    WORKER_BASE = await loadApiBase();
+    ITEMS_URL = `${WORKER_BASE}/items`;
   }
 
-if (filter === "projects" && activeProjectClass) {
-  url.searchParams.set("project_class", activeProjectClass);
-}
-
-if (filter === "fiction" && activeFictionClass) {
-  url.searchParams.set("fiction_class", activeFictionClass);
-}
-
-if (filter === "topics" && activeTopic) {
-  url.searchParams.set("topic", activeTopic);
-}
-
-return url.toString();
-}
-
-
-async function loadItems() {
-  const res = await fetch(buildItemsUrl(), { cache: "no-store" });
+  const res = await fetch(ITEMS_URL, { cache: "no-store" });
   const data = await res.json();
 
-  // Worker kann direkt ein Array liefern
-  if (Array.isArray(data)) {
-    return data.map(normalizeItem);
-  }
-
-  // Alternativ: API liefert { items: [...] }
   if (data && typeof data === "object" && Array.isArray(data.items)) {
     return data.items.map(normalizeItem);
   }
+  // Backward compatibility if API ever returns a raw array
+  if (Array.isArray(data)) return data.map(normalizeItem);
 
   return [];
 }
 
 /* ---------------- filter/sort ---------------- */
-
-function setActiveChip(filter) {
-  activeFilter = filter;
-  els.chips.forEach((b) => {
-    const isActive = b.dataset.filter === filter;
-    b.classList.toggle("is-active", isActive);
-  });
-}
 
 function normalizeTypeForFilter(type) {
   const t = String(type || "").toLowerCase();
@@ -245,19 +212,54 @@ function normalizeTypeForFilter(type) {
   return map[t] || t;
 }
 
+function setActiveChip(filter) {
+  activeFilter = filter;
+
+  els.typeChips.forEach((b) => {
+    const isActive = b.dataset.filter === filter;
+    b.classList.toggle("is-active", isActive);
+  });
+
+  // Reset subfilters when switching main category
+  if (activeFilter !== "projects") activeProjectClass = "all";
+  if (activeFilter !== "fiction") activeFictionClass = "all";
+  if (activeFilter !== "topics") activeTopicGroup = "all";
+
+  // Clear active styling on subchips
+  els.projectChips.forEach((b) => b.classList.remove("is-active"));
+  els.fictionChips.forEach((b) => b.classList.remove("is-active"));
+  els.topicChips.forEach((b) => b.classList.remove("is-active"));
+
+  updateSubChipsVisibility();
+}
+
+function updateSubChipsVisibility() {
+  if (els.projectBox) els.projectBox.hidden = activeFilter !== "projects";
+  if (els.fictionBox) els.fictionBox.hidden = activeFilter !== "fiction";
+  if (els.topicBox) els.topicBox.hidden = activeFilter !== "topics";
+}
+
 function passesFilter(item, q, filter) {
   const type = normalizeTypeForFilter(item.type);
 
-  // Typ-Filter
+  // main type filter
   if (filter !== "all" && type !== filter) return false;
 
-  // Projektklassen-Filter
-  if (
-    type === "projects" &&
-    activeProjectClass !== "all" &&
-    item.project_class !== activeProjectClass
-  ) {
-    return false;
+  // project class subfilter
+  if (type === "projects" && activeProjectClass !== "all") {
+    if (String(item.project_class || "").trim() !== activeProjectClass) return false;
+  }
+
+  // fiction class subfilter
+  if (type === "fiction" && activeFictionClass !== "all") {
+    if (String(item.fiction_class || "").trim() !== activeFictionClass) return false;
+  }
+
+  // topic group subfilter (stored in meta.topicGroup by editor.js)
+  if (type === "topics" && activeTopicGroup !== "all") {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    const key = normalizeGroupKey(meta?.topicGroup || "");
+    if (key !== activeTopicGroup) return false;
   }
 
   if (!q) return true;
@@ -271,14 +273,14 @@ function passesFilter(item, q, filter) {
     ...(Array.isArray(item.tags) ? item.tags : []),
     type,
     meta ? JSON.stringify(meta) : "",
+    item.project_class || "",
+    item.fiction_class || "",
   ]
     .map(normalizeText)
     .join(" ");
 
   return hay.includes(q);
 }
-
-
 
 function sortItemsByYear(items) {
   return [...items].sort((a, b) => {
@@ -300,18 +302,12 @@ function sortItemsByYear(items) {
 function renderMediaDefault(imagePath, title) {
   return `
     <div class="card__media">
-      ${
-        imagePath
-          ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">`
-          : ``
-      }
+      ${imagePath ? `<img class="card__img" src="${imagePath}" alt="${title}" loading="lazy">` : ``}
       <div class="card__fade" aria-hidden="true"></div>
     </div>
   `;
 }
 
-// Book: unified gradient across cover + right panel.
-// Stardust is now GLOBAL behind all tiles, so no per-book canvas here anymore.
 function renderMediaBook(imagePath, title) {
   const hasImg = Boolean(String(imagePath || "").trim());
 
@@ -327,7 +323,6 @@ function renderMediaBook(imagePath, title) {
         radial-gradient(140% 120% at 18% 35%, rgba(255,255,255,0.12), rgba(0,0,0,0.92));
     ">
 
-      <!-- unified soft grey → black fade (THIS is the place you tweak in DevTools) -->
       <div aria-hidden="true" style="
         position:absolute;
         inset:0;
@@ -345,7 +340,6 @@ function renderMediaBook(imagePath, title) {
         z-index:1;
       "></div>
 
-      <!-- cover -->
       <div data-cover style="
         position:relative;
         z-index:2;
@@ -378,7 +372,6 @@ function renderMediaBook(imagePath, title) {
         }
       </div>
 
-      <!-- right panel (kept for layout balance; global stardust is behind the whole page) -->
       <div style="
         position:relative;
         z-index:2;
@@ -462,131 +455,6 @@ function render(items) {
     .join("");
 }
 
-/* ---------------- global stardust (background) ---------------- */
-
-let bgDust = null;
-
-function ensureGlobalDustCanvas() {
-  // Create canvas if missing
-  let canvas = document.getElementById("stardust-bg");
-  if (!canvas) {
-    canvas = document.createElement("canvas");
-    canvas.id = "stardust-bg";
-    document.body.prepend(canvas);
-  }
-
-  // Ensure required styling (safe even if you also set CSS in your stylesheet)
-  canvas.style.position = "fixed";
-  canvas.style.inset = "0";
-  canvas.style.zIndex = "0";
-  canvas.style.pointerEvents = "none";
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.setAttribute("aria-hidden", "true");
-
-  // Make common containers sit above it (only if not already done in CSS)
-  // This is intentionally minimal; your CSS can override.
-  const bump = (sel) => {
-    document.querySelectorAll(sel).forEach((el) => {
-      const cs = getComputedStyle(el);
-      if (cs.position === "static") el.style.position = "relative";
-      if (!el.style.zIndex) el.style.zIndex = "1";
-    });
-  };
-  bump(".main_page");
-  bump(".sectionCardsStack");
-  bump(".card");
-
-  return canvas;
-}
-
-function createDustFixed(canvas) {
-  const ctx = canvas.getContext("2d", { alpha: true });
-  let cssW = 1;
-  let cssH = 1;
-  let parts = [];
-
-  function resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    cssW = Math.max(1, Math.floor(window.innerWidth));
-    cssH = Math.max(1, Math.floor(window.innerHeight));
-
-    canvas.width = Math.floor(cssW * dpr);
-    canvas.height = Math.floor(cssH * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // Density tuned for full-screen; keep it subtle
-    const count = Math.floor(Math.min(1400, Math.max(380, (cssW * cssH) / 5200)));
-    parts = Array.from({ length: count }, () => ({
-      x: Math.random() * cssW,
-      y: Math.random() * cssH,
-      vx: 0,
-      vy: 0,
-    }));
-
-    ctx.clearRect(0, 0, cssW, cssH);
-  }
-
-  function step() {
-    // True transparent frame (no black film)
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    // No "lighter" -> avoids whitening / snow effect
-    ctx.globalCompositeOperation = "source-over";
-
-    // Subtle dust strokes
-    ctx.strokeStyle = "rgba(170,170,170,0.05)";
-
-    for (const p of parts) {
-      const ox = p.x;
-      const oy = p.y;
-
-      // Gentle random walk
-      p.vx += (Math.random() - 0.5) * 0.02;
-      p.vy += (Math.random() - 0.5) * 0.02;
-
-      p.vx *= 0.96;
-      p.vy *= 0.96;
-
-      p.x += p.vx;
-      p.y += p.vy;
-
-      // Wrap around edges (more stable than respawning)
-      if (p.x < 0) p.x += cssW;
-      if (p.x >= cssW) p.x -= cssW;
-      if (p.y < 0) p.y += cssH;
-      if (p.y >= cssH) p.y -= cssH;
-
-      ctx.beginPath();
-      ctx.moveTo(ox, oy);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-    }
-
-    requestAnimationFrame(step);
-  }
-
-  const onResize = () => resize();
-  window.addEventListener("resize", onResize, { passive: true });
-
-  resize();
-  requestAnimationFrame(step);
-
-  return {
-    destroy() {
-      try {
-        window.removeEventListener("resize", onResize);
-      } catch {}
-    },
-  };
-}
-
-function initGlobalDust() {
-  const canvas = ensureGlobalDustCanvas();
-  if (bgDust) return;
-  bgDust = createDustFixed(canvas);
-}
-
 /* ---------------- init ---------------- */
 
 function applyAndRender() {
@@ -595,13 +463,15 @@ function applyAndRender() {
   render(filtered);
 }
 
+function setActiveSubChip(buttons, activeButton) {
+  buttons.forEach((b) => b.classList.toggle("is-active", b === activeButton));
+}
+
 async function init() {
-  WORKER_BASE = await loadApiBase();
-  ITEMS_URL = `${WORKER_BASE}/items`;
   if (els.year) els.year.textContent = String(new Date().getFullYear());
 
-  // Start global background dust once
-  initGlobalDust();
+  // Default: show nothing for subchips until a main filter is selected
+  updateSubChipsVisibility();
 
   try {
     allItems = await loadItems();
@@ -624,28 +494,46 @@ async function init() {
 
   allItems = sortItemsByYear(allItems);
 
-els.chips.forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const nextFilter = btn.dataset.filter || "all";
-    setActiveChip(nextFilter);
-    updateSubfilters(nextFilter);
-
-    // Step 5.3c – Subfilter reset
-    if (nextFilter !== "projects") activeProjectClass = null;
-    if (nextFilter !== "fiction") activeFictionClass = null;
-    if (nextFilter !== "topics") activeTopic = null;
-
-    allItems = await loadItems();
-    allItems = sortItemsByYear(allItems);
-    applyAndRender();
+  // Type chips
+  els.typeChips.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setActiveChip(btn.dataset.filter || "all");
+      applyAndRender();
+    });
   });
-});
 
+  // Project class chips
+  els.projectChips.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      // Expect value like "CLASS V" in HTML
+      activeProjectClass = String(btn.dataset.projectClass || "").trim() || "all";
+      setActiveSubChip(els.projectChips, btn);
+      applyAndRender();
+    });
+  });
+
+  // Fiction class chips
+  els.fictionChips.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activeFictionClass = String(btn.dataset.fictionClass || "").trim() || "all";
+      setActiveSubChip(els.fictionChips, btn);
+      applyAndRender();
+    });
+  });
+
+  // Topic group chips (normalized)
+  els.topicChips.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activeTopicGroup = normalizeGroupKey(btn.dataset.topic || "") || "all";
+      setActiveSubChip(els.topicChips, btn);
+      applyAndRender();
+    });
+  });
 
   els.q?.addEventListener("input", () => applyAndRender());
 
+  // Default active type
   setActiveChip("all");
-  updateSubfilters("all");
   applyAndRender();
 }
 
