@@ -34,6 +34,8 @@ let UPLOAD_URL = "";
 let BOOK_SUGGEST_URL = "";
 let BOOK_AUTOFILL_URL = "";
 let BOOK_ENRICH_URL = "";
+let TITLE_SUGGEST_URL = "";
+let AI_ENRICH_URL = "";
 
 const publishedEl = $("published");
 
@@ -52,6 +54,15 @@ const normalizeType = (t) => {
   if (s === "books") return "book";
   if (s === "people") return "person";
   return s;
+};
+
+
+const parseIntOrNull = (v) => {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
 };
 
 function getValue(id) {
@@ -144,6 +155,9 @@ function buildItem() {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
+    startYear: parseIntOrNull(getValue("startYear")),
+    endYear: parseIntOrNull(getValue("endYear")),
+    sortYear: parseIntOrNull(getValue("sortYear")),
     meta: null,
     project_class: null,
     fiction_class: null,
@@ -375,6 +389,9 @@ function loadItemIntoForm(item) {
   setValue("imageUrl", item.imageUrl || "");
   setValue("summary", item.summary || "");
   setValue("tags", Array.isArray(item.tags) ? item.tags.join(", ") : (item.tags || ""));
+  setValue("startYear", item.startYear ?? "");
+  setValue("endYear", item.endYear ?? "");
+  setValue("sortYear", item.sortYear ?? "");
 
   // reset type-specific fields
   const t = normalizeType(item.type);
@@ -604,34 +621,134 @@ $("type")?.addEventListener("change", () => {
   showFieldsForType(getValue("type"));
 });
 
-// Live suggestions (book titles)
-$("title")?.addEventListener("input", async () => {
-  if (!isBookType()) return;
+// Live suggestions (title)
+let titleSuggestTimer = null;
 
-  const q = getValue("title");
-  const list = $("titleSuggestions");
-  if (!list) return;
+async function fetchTitleSuggestions(q) {
+  const u = new URL(TITLE_SUGGEST_URL);
+  u.searchParams.set("q", q);
+  const res = await fetch(u.toString(), { cache: "no-store" });
+  const parsed = await safeReadJson(res);
+  if (!res.ok) throw new Error(parsed.ok ? JSON.stringify(parsed.json) : parsed.raw);
+  return parsed.ok ? parsed.json?.suggestions || [] : [];
+}
 
-  list.innerHTML = "";
-  latestBookSuggestions = [];
+function renderTitleSuggestions(suggestions) {
+  const box = $("titleSuggestions");
+  if (!box) return;
 
-  if (!q || q.length < 2) return;
-  if (q.toLowerCase() === lastBookQuery.toLowerCase()) return;
-  lastBookQuery = q;
-
-  try {
-    latestBookSuggestions = await fetchBookSuggestions(q);
-  } catch (e) {
-    setOutput("Suggest Fehler:\n" + (e?.message || e));
-    latestBookSuggestions = [];
+  if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    box.innerHTML = "";
     return;
   }
 
-  latestBookSuggestions.slice(0, 12).forEach((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.title;
-    list.appendChild(opt);
+  const btns = suggestions.slice(0, 10).map((s) => {
+    const title = String(s?.title || "").trim();
+    const href = String(s?.href || "").trim();
+    const src = String(s?.source || "").trim();
+    if (!title) return "";
+    const label = src ? `${title}  [${src}]` : title;
+    const dataHref = href ? ` data-href="${escapeHtml(href)}"` : "";
+    return `<button type="button" class="chip" data-title="${escapeHtml(title)}"${dataHref}>${escapeHtml(label)}</button>`;
   });
+
+  box.innerHTML = `<div class="chips" style="margin-top:6px;">${btns.join("")}</div>`;
+
+  box.querySelectorAll("button[data-title]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const t = b.getAttribute("data-title") || "";
+      const h = b.getAttribute("data-href") || "";
+      if (t) setValue("title", t);
+      if (h && !getValue("href")) setValue("href", h);
+      maybeAutoEnrich();
+    });
+  });
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+async function runAiEnrich() {
+  const title = getValue("title");
+  if (!title || title.trim().length < 2) return;
+
+  const token = requireAdminToken("Auto-enrich");
+  if (!token) return;
+
+  const res = await fetch(AI_ENRICH_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin-token": token },
+    body: JSON.stringify({ title: title.trim(), type: getValue("type") }),
+  });
+
+  const parsed = await safeReadJson(res);
+  if (!res.ok) {
+    return setOutput(
+      `Auto-enrich Fehler (${res.status}):\n${parsed.ok ? JSON.stringify(parsed.json, null, 2) : parsed.raw}`
+    );
+  }
+
+  const data = parsed.ok ? parsed.json : null;
+  if (!data) return;
+
+  if (data.href && !getValue("href")) setValue("href", data.href);
+  if (data.summary && !getValue("summary")) setValue("summary", data.summary);
+  if (Array.isArray(data.tags) && data.tags.length && !getValue("tags")) {
+    setValue("tags", data.tags.join(", "));
+  }
+
+  setOutput({ ok: true, aiEnrich: data });
+}
+
+function maybeAutoEnrich() {
+  // conservative: only fill empty fields
+  const title = getValue("title").trim();
+  if (title.length < 3) return;
+
+  const needHref = !getValue("href").trim();
+  const needSummary = !getValue("summary").trim();
+  const needTags = !getValue("tags").trim();
+
+  if (!(needHref || needSummary || needTags)) return;
+
+  // Trigger only if the user explicitly set a token before (no prompt spam)
+  const token = localStorage.getItem("spacesettlement_admin_token");
+  if (!token) return;
+
+  runAiEnrich().catch(console.error);
+}
+
+$("title")?.addEventListener("input", async () => {
+  const q = getValue("title").trim();
+  if (!q || q.length < 2) return renderTitleSuggestions([]);
+
+  if (titleSuggestTimer) clearTimeout(titleSuggestTimer);
+  titleSuggestTimer = setTimeout(async () => {
+    try {
+      const suggestions = await fetchTitleSuggestions(q);
+      renderTitleSuggestions(suggestions);
+    } catch (e) {
+      // silent
+    }
+  }, 200);
+});
+
+$("title")?.addEventListener("blur", () => {
+  maybeAutoEnrich();
+});
+
+$("aiEnrich")?.addEventListener("click", () => {
+  runAiEnrich().catch(console.error);
+});
+
+
+
 });
 
 // Buttons
@@ -672,6 +789,8 @@ async function init() {
   BOOK_SUGGEST_URL = `${WORKER_BASE}/books/suggest`;
   BOOK_AUTOFILL_URL = `${WORKER_BASE}/books/autofill`;
   BOOK_ENRICH_URL = `${WORKER_BASE}/books/enrich`;
+  TITLE_SUGGEST_URL = `${WORKER_BASE}/suggest-title`;
+  AI_ENRICH_URL = `${WORKER_BASE}/ai/enrich`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -91,6 +91,10 @@
             <input id="title" class="input" placeholder="Name / Project / Person / Book ..." />
             <div id="titleSuggestions" class="code" style="white-space:normal; margin-top:8px;"></div>
 
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+              <button id="aiEnrich" class="btn" type="button">Auto-enrich (Link + Summary + Tags)</button>
+            </div>
+
             <label>External URL (href)</label>
             <input id="href" class="input" placeholder="https://…" />
 
@@ -108,6 +112,15 @@
 
             <label>Tags (comma separated)</label>
             <input id="tags" class="input" placeholder="habitats, infrastructure" />
+
+            <label>Beginn (Jahr)</label>
+            <input id="startYear" class="input" placeholder="e.g., 1969" />
+
+            <label>Ende (Jahr)</label>
+            <input id="endYear" class="input" placeholder="e.g., 1972" />
+
+            <label>Sortierjahr</label>
+            <input id="sortYear" class="input" placeholder="e.g., 1970" />
 
             <!-- Person-only fields -->
             <div id="personFields" style="display:none; margin-top:14px;">
