@@ -153,11 +153,13 @@ function debounce(fn, ms) {
 
 async function fetchTitleSuggestions(q) {
   if (!q || q.trim().length < 2) return [];
+  if (!TITLE_SUGGEST_URL) await init();
+
   const u = new URL(TITLE_SUGGEST_URL);
   u.searchParams.set("q", q.trim());
   const r = await fetch(u.toString(), { cache: "no-store" });
   if (!r.ok) return [];
-  const data = await r.json();
+  const data = await r.json().catch(() => ({}));
   return Array.isArray(data?.suggestions) ? data.suggestions : [];
 }
 
@@ -182,19 +184,23 @@ function renderTitleSuggestions(list) {
       return `<div style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.08);">
         <button class="btn btn--ghost" type="button" data-sidx="${idx}" style="padding:6px 10px;">${safeT}</button>
         <span style="opacity:.75; font-size:12px;">${safeSrc}</span>
-        ${href ? `<span style="opacity:.65; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${href}</span>` : ""}
+        ${
+          href
+            ? `<span style="opacity:.65; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${href}</span>`
+            : ""
+        }
       </div>`;
     })
     .join("");
 
   // Attach click behavior
   box.querySelectorAll("button[data-sidx]").forEach((btn) => {
-    btn.addEventListener("click", async (e) => {
+    btn.addEventListener("click", async () => {
       const i = parseInt(btn.getAttribute("data-sidx"), 10);
       const s = list[i];
       if (!s) return;
 
-      $("title").value = String(s.title || "").trim();
+      if ($("title")) $("title").value = String(s.title || "").trim();
 
       // If suggestion has href, set it immediately.
       if (s.href && $("href")) $("href").value = String(s.href).trim();
@@ -212,11 +218,12 @@ const onTitleInput = debounce(async () => {
     const q = ($("title")?.value || "").trim();
     if (!q || q.length < 2) return renderTitleSuggestions([]);
     const list = await fetchTitleSuggestions(q);
+    console.log("[editor] suggest-title:", q);
     renderTitleSuggestions(list);
-  } catch (_) {
-    // ignore
+  } catch (e) {
+    console.error("[editor] suggest failed", e);
   }
-}, 200);
+}, 250);
 
 /* =========================
    AI ENRICH (Link + Summary + Tags)
@@ -295,6 +302,8 @@ function readForm() {
 }
 
 async function createItem() {
+  if (!ITEMS_URL) await init();
+
   const token = requireAdminToken("Create item");
   if (!token) return setOutput("Create cancelled (no token).");
 
@@ -319,6 +328,8 @@ async function createItem() {
 }
 
 async function updateItem(id) {
+  if (!ITEMS_URL) await init();
+
   const token = requireAdminToken("Update item");
   if (!token) return setOutput("Update cancelled (no token).");
 
@@ -344,6 +355,8 @@ async function updateItem(id) {
 }
 
 async function deleteItem(id) {
+  if (!ITEMS_URL) await init();
+
   const token = requireAdminToken("Delete item");
   if (!token) return setOutput("Delete cancelled (no token).");
 
@@ -458,36 +471,37 @@ function generateJson() {
 document.addEventListener("DOMContentLoaded", () => {
   console.log("[editor] DOM ready");
 
-  init().catch(err => {
+  init().catch((err) => {
     console.error("[editor] init failed", err);
   });
 
-  const titleInput = document.getElementById("title");
-  if (!titleInput) {
+  // Title autocomplete
+  const titleInput = $("title");
+  if (titleInput) {
+    titleInput.addEventListener("input", onTitleInput);
+  } else {
     console.error("[editor] title input not found");
-    return;
   }
 
-  let debounceTimer = null;
+  // Buttons
+  const uploadBtn = $("uploadImage");
+  if (uploadBtn) uploadBtn.addEventListener("click", uploadImage);
 
-  titleInput.addEventListener("input", () => {
-    const q = titleInput.value.trim();
-    if (q.length < 2) return;
+  const enrichBtn = $("aiEnrich");
+  if (enrichBtn) enrichBtn.addEventListener("click", aiEnrich);
 
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(async () => {
-      try {
-        console.log("[editor] suggest-title:", q);
+  const genBtn = $("generate");
+  if (genBtn) genBtn.addEventListener("click", generateJson);
 
-        const r = await fetch(
-          `${TITLE_SUGGEST_URL}?q=${encodeURIComponent(q)}`
-        );
-        const data = await r.json();
+  const refreshBtn = $("refreshList");
+  if (refreshBtn) refreshBtn.addEventListener("click", refreshPublishedList);
 
-        renderTitleSuggestions(data.suggestions || []);
-      } catch (e) {
-        console.error("[editor] suggest failed", e);
-      }
-    }, 300);
-  });
+  // "OK / Publish" = create when nothing selected, otherwise update selected
+  const publishBtn = $("publish");
+  if (publishBtn) {
+    publishBtn.addEventListener("click", async () => {
+      if (SELECTED_ID) return updateItem(SELECTED_ID);
+      return createItem();
+    });
+  }
 });
