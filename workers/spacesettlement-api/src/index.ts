@@ -2,12 +2,9 @@
 
 export interface Env {
   DB: D1Database;
-  // Set via: wrangler secret put ADMIN_TOKEN
+  IMAGES: R2Bucket;
   ADMIN_TOKEN?: string;
-
-  // Set via: wrangler secret put OPENAI_API_KEY
   OPENAI_API_KEY?: string;
-  // Optional. Default: gpt-4.1-mini
   OPENAI_MODEL?: string;
 }
 
@@ -25,6 +22,7 @@ type Item = {
   startYear: number | null;
   endYear: number | null;
   sortYear: number | null;
+  budgetBillionUSD: number | null;
   createdAt: string;
 };
 
@@ -66,6 +64,13 @@ function normalizeInt(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeFloat(v: unknown) {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
 function requireAdmin(request: Request, env: Env): Response | null {
   const configured = (env.ADMIN_TOKEN || "").trim();
   if (!configured) return json({ error: "Server misconfigured: missing ADMIN_TOKEN" }, 500);
@@ -98,7 +103,7 @@ export default {
       const topic = url.searchParams.get("topic"); // optional, if you store topics somewhere
 
       let sql =
-        "SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, createdAt " +
+        "SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt " +
         "FROM items";
 
       const conditions: string[] = [];
@@ -192,8 +197,8 @@ export default {
       };
 
       await env.DB.prepare(
-        "INSERT INTO items (id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, createdAt) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO items (id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
         .bind(
           item.id,
@@ -209,6 +214,7 @@ export default {
           item.startYear,
           item.endYear,
           item.sortYear,
+          item.budgetBillionUSD,
           item.createdAt
         )
         .run();
@@ -216,7 +222,89 @@ export default {
       return json(item, 200);
     }
 
-    // -----------------------
+    
+
+// -----------------------
+// PUT /items  (update)
+// Query: ?id=<itemId>
+// Body: same shape as POST (type, title, href, imageUrl, summary, tags[], project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD)
+// -----------------------
+if (request.method === "PUT" && path === "/items") {
+  const guard = requireAdmin(request, env);
+  if (guard) return guard;
+
+  const id = String(url.searchParams.get("id") || "").trim();
+  if (!id) return json({ error: "Missing id" }, 400);
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const now = new Date().toISOString();
+  const type = normalizeType(body?.type);
+  const title = String(body?.title || "").trim();
+
+  if (!type) return json({ error: "Missing type" }, 400);
+  if (!title) return json({ error: "Missing title" }, 400);
+
+  await env.DB.prepare(
+    "UPDATE items SET type = ?, title = ?, href = ?, imageUrl = ?, summary = ?, tags = ?, meta = ?, project_class = ?, fiction_class = ?, startYear = ?, endYear = ?, sortYear = ?, budgetBillionUSD = ?, createdAt = ? WHERE id = ?"
+  )
+    .bind(
+      type,
+      title,
+      String(body?.href || "").trim(),
+      String(body?.imageUrl || "").trim(),
+      String(body?.summary || "").trim(),
+      JSON.stringify(Array.isArray(body?.tags) ? body.tags.map((x: any) => String(x).trim()).filter(Boolean) : []),
+      body?.meta == null ? null : JSON.stringify(body.meta),
+      body?.project_class ?? null,
+      body?.fiction_class ?? null,
+      normalizeInt(body?.startYear),
+      normalizeInt(body?.endYear),
+      normalizeInt(body?.sortYear),
+      normalizeFloat(body?.budgetBillionUSD),
+      now,
+      id
+    )
+    .run();
+
+  const row = await env.DB.prepare(
+    "SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt FROM items WHERE id = ?"
+  )
+    .bind(id)
+    .first();
+
+  if (!row) return json({ error: "Not found" }, 404);
+
+  return json(
+    {
+      ok: true,
+      updated: {
+        id: row.id,
+        type: row.type,
+        title: row.title,
+        href: row.href || "",
+        imageUrl: row.imageUrl || "",
+        summary: row.summary || "",
+        tags: row.tags ? safeJsonParse(row.tags, []) : [],
+        meta: row.meta ? safeJsonParse(row.meta, null) : null,
+        project_class: row.project_class ?? null,
+        fiction_class: row.fiction_class ?? null,
+        startYear: row.startYear ?? null,
+        endYear: row.endYear ?? null,
+        sortYear: row.sortYear ?? null,
+        budgetBillionUSD: row.budgetBillionUSD ?? null,
+        createdAt: row.createdAt ?? null,
+      },
+    },
+    200
+  );
+}
+// -----------------------
     // DELETE /items?id=...
     // -----------------------
     // -----------------------
@@ -243,11 +331,16 @@ export default {
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
 
-      await env.DB.prepare(
-        "INSERT INTO images (id, contentType, data, createdAt) VALUES (?, ?, ?, ?)"
-      )
-        .bind(id, contentType, new Uint8Array(buf), now)
-        .run();
+await env.IMAGES.put(id, buf, {
+  httpMetadata: { contentType },
+});
+
+// Nur Metadaten in D1 speichern
+await env.DB.prepare(
+  "INSERT INTO images (id, contentType, data, createdAt) VALUES (?, ?, ?, ?)"
+)
+.bind(id, contentType, new Uint8Array(), now)
+.run();
 
       const origin = new URL(request.url).origin;
       return json({ imageUrl: `${origin}/images/${id}` }, 200);
@@ -260,22 +353,27 @@ export default {
       const id = path.slice("/images/".length).trim();
       if (!id) return json({ error: "Missing id" }, 400);
 
-      const rs = await env.DB.prepare(
-        "SELECT contentType, data FROM images WHERE id = ?"
-      )
-        .bind(id)
-        .first();
+const meta = await env.DB.prepare(
+  "SELECT contentType FROM images WHERE id = ?"
+)
+.bind(id)
+.first();
 
-      if (!rs) return json({ error: "Not found" }, 404);
+const obj = await env.IMAGES.get(id);
+if (!obj) return json({ error: "Not found" }, 404);
 
-      return new Response(rs.data as ArrayBuffer, {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": String(rs.contentType || "application/octet-stream"),
-          "Cache-Control": "public, max-age=31536000, immutable",
-        },
-      });
+const contentType =
+  obj.httpMetadata?.contentType ||
+  String((meta as any)?.contentType || "application/octet-stream");
+
+return new Response(obj.body, {
+  status: 200,
+  headers: {
+    ...corsHeaders,
+    "Content-Type": contentType,
+    "Cache-Control": "public, max-age=31536000, immutable",
+  },
+});
     }
 
     // -----------------------

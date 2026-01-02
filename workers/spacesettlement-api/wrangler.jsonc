@@ -14,15 +14,22 @@
 		// The path to the directory containing the `index.html` file to be served at `/`
 		"directory": "./public"
 	},
-	"observability": {
-		"enabled": true
-	},
-	
+"observability": {
+  "enabled": true
+},
+
 "d1_databases": [
   {
     "binding": "DB",
     "database_name": "spacesettlement-db",
     "database_id": "f899bfb4-d418-41b5-8bc8-30b4fb06f6cd"
+  }
+],
+
+"r2_buckets": [
+  {
+    "binding": "IMAGES",
+    "bucket_name": "spacesettlement-image"
   }
 ],
 
