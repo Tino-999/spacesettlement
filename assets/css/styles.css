@@ -463,3 +463,17 @@ a:hover{opacity:.92}
   width: 100%;
   object-fit: cover;
 }
+
+@media (max-width: 768px) {
+/* Cards dürfen auf Mobile wachsen */
+#cards .card {
+height: auto;
+}
+
+/* Bild bekommt festen Bildbereich */
+#cards .card img {
+height: 220px;
+max-height: 220px;
+object-fit: cover;
+}
+}
