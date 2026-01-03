@@ -5,3 +5,35 @@ node_modules/
 .DS_Store
 
 
+# Cloudflare Wrangler
+.wrangler/
+
+# Local dev env
+.dev.vars
+
+# Editor
+.vscode/
+
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Wrangler / Cloudflare
+.wrangler/
+dist/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+*.loog
+
+
+node_modules/
+
+
