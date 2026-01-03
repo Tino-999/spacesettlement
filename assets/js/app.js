@@ -595,7 +595,7 @@ function applyAndRender() {
   filtered.sort((a, b) => {
     const ay = getStartYear(a);
     const by = getStartYear(b);
-    if (ay != null && by != null && ay !== by) return by - ay;
+    if (ay != null && by != null && ay !== by) return ay - by;
     if (ay != null && by == null) return -1;
     if (ay == null && by != null) return 1;
     return 0;

@@ -450,3 +450,16 @@ a:hover{opacity:.92}
   border-color: rgba(255,255,255,0.20) !important;
 }
 
+/* Library: fixed card height */
+#cards .card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 420px; /* an bestehende Book-Karten angepasst */
+}
+
+/* Library: constrain card images */
+#cards .card img {
+  max-height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
