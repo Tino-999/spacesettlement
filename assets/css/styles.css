@@ -413,3 +413,40 @@ a:hover{opacity:.92}
 .is-hidden{display:none}
 .is-visible{display:flex}
 [hidden] { display: none !important; }
+
+.filter-group > button {
+  background: #151517;
+}
+
+.filter-group > button {
+  border-bottom: 1px solid #242426;
+}
+
+.filter-group button[data-project-class],
+.filter-group button[data-fiction-class],
+.filter-group button[data-topic] {
+  background: #1b1b1e;
+}
+
+/* Library: category level distinction */
+.filters .filter-group > button {
+  background: #151517;
+}
+
+.filters .filter-group button[data-project-class],
+.filters .filter-group button[data-fiction-class],
+.filters .filter-group button[data-topic] {
+  background: #1b1b1e;
+}
+
+/* Library: feiner Ebenen-Unterschied (Top vs Sub) */
+.chips:not(.chips-sub) .chip {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+}
+
+.chips.chips-sub .chip {
+  background: rgba(255,255,255,0.14) !important;
+  border-color: rgba(255,255,255,0.20) !important;
+}
+
