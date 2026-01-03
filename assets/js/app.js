@@ -30,7 +30,7 @@ async function loadApiBase() {
   } catch (_) {}
 
   // 3) fallback (staging)
-  return "https://spacesettlement-api-staging.tinoschuldt100.workers.dev";
+ return "https://spacesettlement-api.tinoschuldt100.workers.dev";
 }
 
 let WORKER_BASE = "";
@@ -56,10 +56,10 @@ const els = {
 };
 
 let allItems = [];
-let activeFilter = "all";            // type filter
-let activeProjectClass = "all";      // "CLASS I" .. "CLASS V"
-let activeFictionClass = "all";      // "CLASS A" .. "CLASS D"
-let activeTopicGroup = "all";        // "LAW" / "RELIGION" / "SETTLEMENT ARCHITECTURES"
+let activeFilter = "all";       // type filter
+let activeProjectClass = "all"; // "CLASS I" .. "CLASS V"
+let activeFictionClass = "all"; // "CLASS A" .. "CLASS D"
+let activeTopicGroup = "all";   // "LAW" / "RELIGION" / "SETTLEMENT ARCHITECTURES"
 
 /* ---------------- helpers ---------------- */
 
@@ -174,6 +174,82 @@ function resolveImagePath(item) {
   return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
 }
 
+/* ---------------- helper: years & budget ---------------- */
+
+function toNumberOrNull(v) {
+  if (v == null) return null;
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (!t) return null; // verhindert "" -> 0
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toYearOrNull(v) {
+  const n = toNumberOrNull(v);
+  if (n == null) return null;
+  const y = Math.trunc(n);
+  // verhindert 0/NaN und offensichtliche Ausreißer
+  if (y < 1000 || y > 3000) return null;
+  return y;
+}
+
+function getStartYear(item) {
+  const meta = item && typeof item.meta === "object" ? item.meta : null;
+  const candidates = [
+    item?.startyear,
+    item?.startYear,
+    item?.start_year,
+    meta?.startyear,
+    meta?.startYear,
+    meta?.start_year,
+  ];
+  for (const c of candidates) {
+    const y = toYearOrNull(c);
+    if (y != null) return y;
+  }
+  return null;
+}
+
+function getEndYear(item) {
+  const meta = item && typeof item.meta === "object" ? item.meta : null;
+  const candidates = [
+    item?.endyear,
+    item?.endYear,
+    item?.end_year,
+    meta?.endyear,
+    meta?.endYear,
+    meta?.end_year,
+  ];
+  for (const c of candidates) {
+    const y = toYearOrNull(c);
+    if (y != null) return y;
+  }
+  return null;
+}
+
+function getBudgetBillionUSD(item) {
+  const meta = item && typeof item.meta === "object" ? item.meta : null;
+  const candidates = [
+    item?.budget,              // Editor: "budget"
+    item?.budgetBillionUSD,
+    item?.budgetBillionUsd,
+    item?.budget_billion_usd,
+    meta?.budget,
+    meta?.budgetBillionUSD,
+    meta?.budgetBillionUsd,
+    meta?.budget_billion_usd,
+  ];
+  for (const c of candidates) {
+    const n = toNumberOrNull(c);
+    if (n != null) return n;
+  }
+  return null;
+}
+
 /* ---------------- data ---------------- */
 
 async function loadItems() {
@@ -196,20 +272,34 @@ async function loadItems() {
 
 /* ---------------- filter/sort ---------------- */
 
+const TYPE_MAP = {
+  project: "projects",
+  projects: "projects",
+
+  fiction: "fiction",
+
+  topic: "topics",
+  topics: "topics",
+
+  org: "orgs",
+  orgs: "orgs",
+  organization: "orgs",
+
+  person: "people",
+  people: "people",
+
+  book: "books",
+  books: "books",
+
+  movie: "movies",
+  movies: "movies",
+
+  concept: "concepts",
+  concepts: "concepts"
+};
+
 function normalizeTypeForFilter(type) {
-  const t = String(type || "").toLowerCase();
-
-  const map = {
-    book: "books",
-    person: "people",
-    project: "projects",
-    concept: "concepts",
-    organization: "orgs",
-    topic: "topics",
-    movie: "movies",
-  };
-
-  return map[t] || t;
+  return TYPE_MAP[type] || null;
 }
 
 function setActiveChip(filter) {
@@ -239,28 +329,44 @@ function updateSubChipsVisibility() {
   if (els.topicBox) els.topicBox.hidden = activeFilter !== "topics";
 }
 
+function normalizeKey(v) {
+  return String(v || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
+
+function parseMeta(meta) {
+  if (!meta) return null;
+  if (typeof meta === "object") return meta;
+  if (typeof meta === "string") {
+    try { return JSON.parse(meta); } catch { return null; }
+  }
+  return null;
+}
+
 function passesFilter(item, q, filter) {
   const type = normalizeTypeForFilter(item.type);
 
   // main type filter
-  if (filter !== "all" && type !== filter) return false;
+ if (filter !== "all" && (!type || type !== filter)) return false;
 
   // project class subfilter
   if (type === "projects" && activeProjectClass !== "all") {
-    if (String(item.project_class || "").trim() !== activeProjectClass) return false;
-  }
+  if (normalizeKey(item.project_class) !== normalizeKey(activeProjectClass)) return false;
+}
 
   // fiction class subfilter
   if (type === "fiction" && activeFictionClass !== "all") {
-    if (String(item.fiction_class || "").trim() !== activeFictionClass) return false;
-  }
+  if (normalizeKey(item.fiction_class) !== normalizeKey(activeFictionClass)) return false;
+}
 
   // topic group subfilter (stored in meta.topicGroup by editor.js)
-  if (type === "topics" && activeTopicGroup !== "all") {
-    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-    const key = normalizeGroupKey(meta?.topicGroup || "");
-    if (key !== activeTopicGroup) return false;
-  }
+ if (type === "topics" && activeTopicGroup !== "all") {
+  const meta = parseMeta(item.meta);
+  const key = normalizeGroupKey(meta?.topicGroup || "");
+  if (key !== activeTopicGroup) return false;
+}
 
   if (!q) return true;
 
@@ -422,6 +528,28 @@ function render(items) {
       const imagePath = escapeHtml(resolveImagePath(item));
       const hasLink = href && href !== "kein Wiki";
 
+      const start = getStartYear(item);
+      const endRaw = getEndYear(item);
+      const budget = getBudgetBillionUSD(item);
+
+      // Endjahr nur anzeigen, wenn plausibel (>= Startjahr)
+      const end = (start != null && endRaw != null && endRaw >= start) ? endRaw : null;
+
+      let factsHtml = "";
+      if (start != null || budget != null) {
+        factsHtml += `<div class="card__facts">`;
+
+        if (start != null) {
+          factsHtml += `<div>Zeitraum: ${end != null ? `${start}-${end}` : start}</div>`;
+        }
+
+        if (budget != null) {
+          factsHtml += `<div>Budget: ${escapeHtml(String(budget))} Mrd. USD</div>`;
+        }
+
+        factsHtml += `</div>`;
+      }
+
       return `
         <article class="card">
           <div class="card__row">
@@ -440,8 +568,10 @@ function render(items) {
 
               ${summary ? `<p class="card__summary">${summary}</p>` : ""}
 
+              ${factsHtml}
+
               ${
-                tags.length
+                false && tags.length
                   ? `<div class="card__meta" aria-label="tags">
                       ${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
                      </div>`
@@ -460,6 +590,17 @@ function render(items) {
 function applyAndRender() {
   const q = normalizeText(els.q?.value || "");
   const filtered = allItems.filter((it) => passesFilter(it, q, activeFilter));
+
+  // Sortierung nach Startjahr absteigend (falls vorhanden)
+  filtered.sort((a, b) => {
+    const ay = getStartYear(a);
+    const by = getStartYear(b);
+    if (ay != null && by != null && ay !== by) return by - ay;
+    if (ay != null && by == null) return -1;
+    if (ay == null && by != null) return 1;
+    return 0;
+  });
+
   render(filtered);
 }
 
@@ -505,7 +646,6 @@ async function init() {
   // Project class chips
   els.projectChips.forEach((btn) => {
     btn.addEventListener("click", () => {
-      // Expect value like "CLASS V" in HTML
       activeProjectClass = String(btn.dataset.projectClass || "").trim() || "all";
       setActiveSubChip(els.projectChips, btn);
       applyAndRender();

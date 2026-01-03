@@ -282,6 +282,7 @@ async function aiEnrich() {
 function readForm() {
   const type = ($("type")?.value || "").trim();
   const title = ($("title")?.value || "").trim();
+  const budget = ($("budgetBillionUSD")?.value || "").trim();
 
   const payload = {
     type,
@@ -296,6 +297,8 @@ function readForm() {
     endYear: parseIntOrNull($("endYear")?.value),
     sortYear: parseIntOrNull($("sortYear")?.value),
     meta: null, // keep minimal; extend as needed
+    budgetBillionUSD: budget === "" ? null : Number(budget),
+
   };
 
   return payload;
