@@ -515,7 +515,7 @@ pointer-events: none;
   #cards .card img {
     display: block;
     width: 100%;
-    max-height: 240px;   /* ← DAS steuert die Bildhöhe */
+    max-height: 200px;   /* ← DAS steuert die Bildhöhe */
     object-fit: cover;
   }
 }
