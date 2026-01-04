@@ -1,15 +1,11 @@
 
 
 
-Generierte Texte auf English
+Generierte Texte auf anderen Sprachen in i18n-Texte aus i18n.js nach i18n/en.json und i18n/de.json auslagern. Weitere Seiten schrittweise mit data-i18n ausstatten.
 
-About Seite anpassen
+Neusortierung der Überschriften: Rausnehmen Topics. Reinnehmen Debates, Thoughts. Quellen Gruppieren unter Sources (Orgs, Books, Movies, Podcasts)
 
-Admin auf der Public seite verstecken
-
-Überschrift auf der Index Seite anpassen
-
-
+=====================================================================================================================================
 
 Auf der Seite der Library.html sollen nicht mehr die Schlagworte angezeigt werden. Stattdessen: Zeitraum: 1983-2040 (z.B. Beispiel), Wenn nur Startjahr ausgefüllt dann nur Startjahr. Bitte einfügen. Darunter soll das "Budget in Mrd. USD" aufgeführt werden. Bitte einfügen.
 ok
@@ -31,6 +27,18 @@ Auf der Seite der Library.html sollen die Themen jeweils innerhalb eines Themas 
 ok
 
 Auf der Seite der Library.html soll Die Bildhöhe beschränkt sein (so wie heute bei den Büchern). Die Höhe eines Datensatzes sollte immer gleich sein. Das Beld entsprechnd verkleinert.  Bitte anpassen.
+ok
+
+Admin auf der Public seite verstecken
+ok
+
+About Seite anpassen
+ok
+
+Überschrift auf der Index Seite anpassen
+ok
+
+Generierte Texte auf English
 ok
 
 
