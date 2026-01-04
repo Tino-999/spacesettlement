@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>About — Space Settlement</title>
   <link rel="stylesheet" href="../assets/css/styles.css" />
+  <link rel="stylesheet" href="../assets/css/ui-fixes.css" />
 </head>
 <body class="bg">
   <header class="topbar">
@@ -13,7 +14,8 @@
       <a class="brand" href="../index.html">SPACESETTLEMENT</a>
       <nav class="nav">
         <a class="nav__link" href="../library.html">Index</a>
-        <a class="nav__link is-active" href="about.html">About</a>
+        <a class="nav__link is-active" href="about.html">ABOUT</a>
+         <a href="#" id="lang-toggle" class="nav__link">EN</a>
       </nav>
     </div>
   </header>
@@ -21,8 +23,8 @@
   <main class="page">
     <section class="page__intro">
       <h1 class="page__title">About</h1>
-      <p class="page__lead">
-This site is not a manifesto.
+      <p class="page__lead" data-i18n="about.text">
+        This site is not a manifesto.
 It does not say space settlement is necessary.
 It does not say space settlement is the only path.
 
@@ -42,5 +44,6 @@ Just the facts and the structure needed to think the question through.
       </p>
     </section>
   </main>
+  <script src="../assets/js/i18n.js"></script>
 </body>
 </html>
