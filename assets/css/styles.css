@@ -477,50 +477,37 @@ max-height: 220px;
 object-fit: cover;
 }
 }
-/* Mobile image fade into black */
 @media (max-width: 720px) {
 
-#cards .card {
-position: relative;
-overflow: hidden;
-}
-
-#cards .card::after {
-content: "";
-position: absolute;
-left: 0;
-right: 0;
-bottom: 0;
-
-height: 96px;
-
-background: linear-gradient(
-to bottom,
-rgba(0,0,0,0),
-rgba(0,0,0,0.35),
-rgba(0,0,0,0.65),
-rgba(0,0,0,0.9)
-);
-
-pointer-events: none;
-}
-
-
-@media (max-width: 720px) {
   #cards .card {
+    position: relative;
+    overflow: hidden;
     height: auto;
   }
-}
-@media (max-width: 720px) {
+
+  #cards .card::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 96px;
+    background: linear-gradient(
+      to bottom,
+      rgba(0,0,0,0),
+      rgba(0,0,0,0.35),
+      rgba(0,0,0,0.65),
+      rgba(0,0,0,0.9)
+    );
+    pointer-events: none;
+  }
+
   #cards .card img {
     display: block;
     width: 100%;
-    max-height: 200px;   /* ← DAS steuert die Bildhöhe */
+    max-height: 200px;
     object-fit: cover;
-  }
-}
-@media (max-width: 720px) {
-  #cards .card img {
+
     -webkit-mask-image: linear-gradient(
       to bottom,
       rgba(0,0,0,1) 70%,
@@ -534,6 +521,7 @@ pointer-events: none;
   }
 }
 
+
 html, body {
   min-height: 100%;
   background: #000;
@@ -545,41 +533,31 @@ body {
 }
 
 @media (max-width: 520px) {
-  .nav {
-    gap: 6px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .nav__link {
-    padding: 8px 8px;
-  }
-}
-@media (max-width: 520px) {
-  .topbar__inner {
-    flex-wrap: wrap;
-  }
-
-  .nav {
-    width: 100%;
-    justify-content: flex-end;
-  }
-}
-@media (max-width: 520px) {
   .topbar {
     height: auto;
     overflow: visible;
   }
 
   .topbar__inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .brand {
+    flex: 0 0 auto;
   }
 
   .nav {
-    width: 100%;
+    flex: 1 1 100%;
+    display: flex;
     justify-content: flex-end;
+    gap: 6px;
     flex-wrap: wrap;
+  }
+
+  .nav__link {
+    padding: 6px 8px;
+    font-size: 11px;
+    letter-spacing: .14em;
   }
 }
