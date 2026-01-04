@@ -1,0 +1,262 @@
+<script>
+  const API_BASE = "http://127.0.0.1:8787";
+</script>
+
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Editor — Space Settlement</title>
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+
+<body class="bg">
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="index.html">SPACESETTLEMENT</a>
+      <nav class="nav">
+        <a class="nav__link" href="library.html">Index</a>
+        <a class="nav__link is-active" href="admin.html">Editor</a>
+        <a class="nav__link" href="about.html">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="stack">
+      <div class="hero">
+        <h1 class="hero__title">Editor</h1>
+        <p class="hero__sub">Create and publish items. Keep manual input minimal.</p>
+      </div>
+
+      <div class="grid">
+        <!-- LEFT: Editor -->
+        <div class="card">
+          <div class="card__inner">
+            <div class="card__kicker">Create / Update</div>
+
+            <label>Type</label>
+            <select id="type" class="input">
+              <option value="">ALL</option>
+<option value="project">PROJECTS</option>
+              <option value="fiction">FICTION</option>
+              <option value="topic">TOPICS</option>
+              <option value="org">ORGS</option>
+              <option value="person">PEOPLE</option>
+              <option value="book">BOOKS</option>
+              <option value="movie">MOVIES</option>
+              <option value="concept">CONCEPTS</option>
+            </select>
+
+            <!-- SUBFILTERS: shown depending on Type -->
+            <div id="projectSubfilters" style="display:none; margin-top:12px;">
+              <div class="card__kicker">PROJECTS — CLASS</div>
+              <div class="chips" id="projectClassChips">
+                <button type="button" class="chip" data-project-class="CLASS I">CLASS I</button>
+                <button type="button" class="chip" data-project-class="CLASS II">CLASS II</button>
+                <button type="button" class="chip" data-project-class="CLASS III">CLASS III</button>
+                <button type="button" class="chip" data-project-class="CLASS IV">CLASS IV</button>
+                <button type="button" class="chip" data-project-class="CLASS V">CLASS V</button>
+              </div>
+              <input id="projectClass" type="hidden" />
+              <div class="muted" style="margin-top:6px;">
+                Stored as <span class="code">project_class</span>.
+              </div>
+            </div>
+
+            <div id="fictionSubfilters" style="display:none; margin-top:12px;">
+              <div class="card__kicker">FICTION — CLASS</div>
+              <div class="chips" id="fictionClassChips">
+                <button type="button" class="chip" data-fiction-class="CLASS A">CLASS A</button>
+                <button type="button" class="chip" data-fiction-class="CLASS B">CLASS B</button>
+                <button type="button" class="chip" data-fiction-class="CLASS C">CLASS C</button>
+                <button type="button" class="chip" data-fiction-class="CLASS D">CLASS D</button>
+              </div>
+              <input id="fictionClass" type="hidden" />
+              <div class="muted" style="margin-top:6px;">
+                Stored as <span class="code">fiction_class</span>.
+              </div>
+            </div>
+
+            <div id="topicSubfilters" style="display:none; margin-top:12px;">
+              <div class="card__kicker">TOPICS — GROUP</div>
+              <div class="chips" id="topicGroupChips">
+                <button type="button" class="chip" data-topic-group="LAW">LAW</button>
+                <button type="button" class="chip" data-topic-group="RELIGION">RELIGION</button>
+                <button type="button" class="chip" data-topic-group="SETTLEMENT ARCHITECTURES">SETTLEMENT ARCHITECTURES</button>
+              </div>
+              <input id="topicGroup" type="hidden" />
+              <div class="muted" style="margin-top:6px;">
+                For <span class="code">type=topic</span>, only the 3 groups are needed.
+              </div>
+            </div>
+
+            <label style="margin-top:14px;">Title</label>
+            <input id="title" class="input" placeholder="Name / Project / Person / Book ..." />
+            <div id="titleSuggestions" class="code" style="white-space:normal; margin-top:8px;"></div>
+
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+              <button id="aiEnrich" class="btn" type="button">Auto-enrich (Link + Summary + Tags)</button>
+            </div>
+
+            <label>External URL (href)</label>
+            <input id="href" class="input" placeholder="https://…" />
+
+            <label>Image URL</label>
+            <input id="imageUrl" class="input" placeholder="https://…" />
+
+            <label>Image upload</label>
+            <input id="imageFile" class="input" type="file" />
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+              <button id="uploadImage" class="btn" type="button">Upload image</button>
+            </div>
+
+            <label>Summary</label>
+            <textarea id="summary" class="input" rows="4"></textarea>
+
+            <label>Tags (comma separated)</label>
+            <input id="tags" class="input" placeholder="habitats, infrastructure" />
+
+            <label>Beginn (Jahr)</label>
+            <input id="startYear" class="input" placeholder="e.g., 1969" />
+
+            <label>Ende (Jahr)</label>
+            <input id="endYear" class="input" placeholder="e.g., 1972" />
+
+            
+            <label>Budget in Mrd. USD</label>
+            <input id="budgetBillionUSD" class="input" type="number" step="0.1" placeholder="e.g., 12.5" />
+<label>Sortierjahr</label>
+            <input id="sortYear" class="input" placeholder="e.g., 1970" />
+
+            <!-- Person-only fields -->
+            <div id="personFields" style="display:none; margin-top:14px;">
+              <div class="card__kicker">Person fields</div>
+
+              <label>Geburtsjahr</label>
+              <input id="birthYear" class="input" type="number" placeholder="1927" />
+
+              <label>Sterbejahr (leer lassen wenn noch am Leben)</label>
+              <input id="deathYear" class="input" type="number" placeholder="1992" />
+
+              <label>Nationalität(en) (comma separated)</label>
+              <input id="nationality" class="input" placeholder="DE, US" />
+
+              <label>Unternehmen/Universität(en) (Affiliations, comma separated)</label>
+              <input id="affiliations" class="input" placeholder="NASA, Princeton University" />
+
+              <label>Fachgebiet(e) (comma separated)</label>
+              <input id="fields" class="input" placeholder="space engineering, physics" />
+
+              <label>Rollen (comma separated)</label>
+              <input id="roles" class="input" placeholder="engineer, professor" />
+
+              <label>Aktive Jahre Start</label>
+              <input id="activeStartYear" class="input" type="number" placeholder="1955" />
+
+              <label>Aktive Jahre Ende</label>
+              <input id="activeEndYear" class="input" type="number" placeholder="1992" />
+            </div>
+
+            <!-- Book-only fields -->
+            <div id="bookFields" style="display:none; margin-top:14px;">
+              <div class="card__kicker">Book fields</div>
+
+              <label>First publish year (original)</label>
+              <input id="firstPublishYear" class="input" type="number" placeholder="1968" />
+
+              <label>Authors (comma separated)</label>
+              <input id="authors" class="input" placeholder="Author A, Author B" />
+
+              <label>Published year (edition)</label>
+              <input id="publishedYear" class="input" type="number" placeholder="2021" />
+
+              <label>Publisher</label>
+              <input id="publisher" class="input" placeholder="Publisher name" />
+
+              <label>ISBN</label>
+              <input id="isbn" class="input" placeholder="978…" />
+
+              <label>Language</label>
+              <input id="language" class="input" placeholder="en" />
+            </div>
+
+            <div class="ctaRow">
+              <button id="generate" class="btn" type="button">Generate JSON</button>
+              <button id="autofill" class="btn btn--ghost" type="button">Auto-Fill (AI)</button>
+              <button id="publish" class="btn" type="button">OK / Publish</button>
+              <button id="refreshList" class="btn btn--ghost" type="button">Refresh list</button>
+            </div>
+
+            <div class="card__row" style="grid-template-columns:1fr; margin-top:14px;">
+              <div class="card__content">
+                <div class="card__kicker">Output</div>
+                <pre id="output" class="code" style="white-space:pre-wrap; overflow:auto;"></pre>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- RIGHT: Published list -->
+        <div class="card">
+          <div class="card__inner">
+            <div class="card__kicker">Published items</div>
+            <div id="published" class="code" style="white-space:normal"></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Minimal subfilter logic (visual only). -->
+  <script>
+    (function () {
+      const typeEl = document.getElementById("type");
+      const projectBox = document.getElementById("projectSubfilters");
+      const fictionBox = document.getElementById("fictionSubfilters");
+      const topicBox = document.getElementById("topicSubfilters");
+
+      const projectClass = document.getElementById("projectClass");
+      const fictionClass = document.getElementById("fictionClass");
+      const topicGroup = document.getElementById("topicGroup");
+
+      function setVisible(type) {
+        projectBox.style.display = (type === "project") ? "block" : "none";
+        fictionBox.style.display = (type === "fiction") ? "block" : "none";
+        topicBox.style.display   = (type === "topic")   ? "block" : "none";
+      }
+
+      function singleSelect(container, hiddenInput, dataAttr) {
+        container.addEventListener("click", (e) => {
+          const btn = e.target.closest("button[" + dataAttr + "]");
+          if (!btn) return;
+          const val = btn.getAttribute(dataAttr);
+          hiddenInput.value = val;
+
+          [...container.querySelectorAll("button[" + dataAttr + "]")].forEach(b => {
+            b.classList.toggle("is-active", b === btn);
+          });
+        });
+      }
+
+      const projectChips = document.getElementById("projectClassChips");
+      const fictionChips = document.getElementById("fictionClassChips");
+      const topicChips = document.getElementById("topicGroupChips");
+
+      if (projectChips) singleSelect(projectChips, projectClass, "data-project-class");
+      if (fictionChips) singleSelect(fictionChips, fictionClass, "data-fiction-class");
+      if (topicChips) singleSelect(topicChips, topicGroup, "data-topic-group");
+
+      setVisible(typeEl.value);
+      typeEl.addEventListener("change", () => setVisible(typeEl.value));
+    })();
+  </script>
+
+  <!-- Existing editor logic -->
+  <script src="assets/js/editor.js"></script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rationale — Space Settlement</title>
+  <meta name="description" content="Nüchterne, schichtweise Darstellung einer Begründungskette. Keine Rhetorik. Keine Appelle." />
+  <style>
+    :root {
+      --bg: #0f0f10;
+      --fg: #e6e6e6;
+      --muted: #b9b9b9;
+      --line: #2a2a2c;
+      --panel: #171719;
+      --chip: #1f1f22;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      letter-spacing: 0.1px;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 18px 40px;
+    }
+    h1 { margin: 0 0 10px; font-size: 20px; font-weight: 600; }
+    p { margin: 0 0 14px; color: var(--muted); }
+    .rule { height: 1px; background: var(--line); margin: 18px 0; }
+    .grid { display: grid; gap: 12px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .kicker { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+    .chain {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .node {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #121214;
+    }
+    .node-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .node-title { font-size: 14px; font-weight: 600; }
+    .tag {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--chip);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .arrow {
+      color: var(--muted);
+      margin-left: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .def { color: var(--muted); }
+    details {
+      border-top: 1px solid var(--line);
+      margin-top: 10px;
+      padding-top: 10px;
+    }
+    summary {
+      cursor: pointer;
+      color: var(--fg);
+      list-style: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::before {
+      content: "▸";
+      display: inline-block;
+      width: 1.2em;
+      color: var(--muted);
+    }
+    details[open] summary::before { content: "▾"; }
+    ul { margin: 10px 0 0 18px; color: var(--muted); }
+    li { margin: 6px 0; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .cols {
+      display: grid;
+      gap: 12px;
+    }
+    @media (min-width: 860px) {
+      .cols { grid-template-columns: 2fr 1fr; }
+    }
+    .small { font-size: 12px; color: var(--muted); }
+    .box {
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #101012;
+    }
+  </style>
+</head>
+
+<body>
+<main>
+  <h1>Rationale</h1>
+  <p>Diese Seite dokumentiert eine Begründungskette als Entscheidungslogik. Jeder Punkt ist kurz. Detailtiefe ist einklappbar.</p>
+
+  <div class="rule"></div>
+
+  <div class="cols">
+    <section class="card">
+      <div class="kicker">Ebene 1</div>
+      <div class="mono small">Kette (Überblick)</div>
+
+      <div class="chain" aria-label="Begründungskette">
+        <div class="node">
+          <div class="node-header">
+            <div class="node-title">Abhängigkeit von einem Betriebsraum</div>
+            <span class="tag">Prämisse</span>
+          </div>
+          <div class="def">Kritische Funktionen sind räumlich nicht diversifiziert.</div>
+        </div>
+
+        <div class="arrow">↓</div>
+
+        <div class="node">
+          <div class="node-header">
+            <div class="node-title">Korrelation von Ausfallmodi</div>
+            <span class="tag">Ableitung</span>
+          </div>
+          <div class="def">Gemeinsame Störereignisse betreffen viele Systeme gleichzeitig.</div>
+        </div>
+
+        <div class="arrow">↓</div>
+
+        <div class="node">
+          <div class="node-header">
+            <div class="node-title">Nutzen räumlich getrennter Betriebsdomänen</div>
+            <span class="tag">Konsequenz</span>
+          </div>
+          <div class="def">Entkopplung reduziert gemeinsame Ausfallursachen.</div>
+        </div>
+
+        <div class="arrow">↓</div>
+
+        <div class="node">
+          <div class="node-header">
+            <div class="node-title">Off-Earth Infrastruktur als Domäne</div>
+            <span class="tag">Option</span>
+          </div>
+          <div class="def">Eine zweite Domäne ist technisch möglich, erfordert aber Betrieb über lange Dauer.</div>
+        </div>
+      </div>
+
+      <details>
+        <summary>Ebene 2–3: Definitionen, Randbedingungen, Belege</summary>
+
+        <div class="grid" style="margin-top:10px;">
+          <div class="box">
+            <div class="kicker">Begriffe</div>
+            <ul>
+              <li><span class="mono">Betriebsraum</span>: räumlicher Bereich, in dem kritische Systeme betrieben werden.</li>
+              <li><span class="mono">Betriebsdomäne</span>: eigenständige Betriebsumgebung mit eigenen Ressourcen- und Risikoprofilen.</li>
+              <li><span class="mono">Korrelation</span>: gemeinsame Ursache führt zu gemeinsamen Ausfällen.</li>
+            </ul>
+          </div>
+
+          <div class="box">
+            <div class="kicker">Randbedingungen</div>
+            <ul>
+              <li>Nur Aussagen aufnehmen, die mit Quellen belegt sind.</li>
+              <li>Keine Prognosen ohne Modell und Parameter.</li>
+              <li>Keine Zielbehauptungen. Nur technische Konsequenzen.</li>
+            </ul>
+          </div>
+
+          <div class="box">
+            <div class="kicker">Belege (Template)</div>
+            <ul>
+              <li>paper: <span class="mono">[Autor, Jahr, Titel, DOI]</span></li>
+              <li>institution: <span class="mono">[Organisation, Dokument, Datum]</span></li>
+              <li>program: <span class="mono">[Programm, Mission/Phase, Datum]</span></li>
+            </ul>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <aside class="card">
+      <div class="kicker">Lesemodus</div>
+      <p class="small">Diese Seite ist absichtlich nicht werbend. Sie ist eine Struktur für überprüfbare Aussagen.</p>
+
+      <div class="rule"></div>
+
+      <div class="kicker">Nicht-Ableitungen</div>
+      <ul>
+        <li>Keine Aussage über Notwendigkeit zu einem Zeitpunkt.</li>
+        <li>Keine Aussage über politische Ziele.</li>
+        <li>Keine Aussage über Erfolgsaussichten ohne Daten.</li>
+      </ul>
+
+      <div class="rule"></div>
+
+      <div class="kicker">Pflege</div>
+      <ul>
+        <li>Jeder Knoten erhält mindestens einen Beleg oder wird als unbelegt entfernt.</li>
+        <li>Widerspruch in Quellen führt zu einem Vermerk „Disagreement exists“.</li>
+      </ul>
+    </aside>
+  </div>
+
+  <div class="rule"></div>
+
+  <section class="card">
+    <div class="kicker">Alternative Darstellung</div>
+    <p class="small">Diese Matrix reduziert Text, indem sie nur Relationen zeigt. Inhalte bleiben in <span class="mono">&lt;details&gt;</span>.</p>
+
+    <div class="box">
+      <div class="mono small">Matrix (Beispiel)</div>
+      <ul>
+        <li><span class="mono">Prämisse →</span> Korrelation von Ausfallmodi</li>
+        <li><span class="mono">Korrelation →</span> Bedarf an Entkopplung</li>
+        <li><span class="mono">Entkopplung →</span> zweite Betriebsdomäne</li>
+        <li><span class="mono">zweite Domäne →</span> Off-Earth Infrastruktur</li>
+      </ul>
+    </div>
+  </section>
+</main>
+</body>
+</html>
