@@ -539,7 +539,7 @@ body {
   }
 
   .topbar__inner {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;      /* bleibt eine Zeile */
     gap: 10px;
   }
 
@@ -548,11 +548,11 @@ body {
   }
 
   .nav {
-    flex: 1 1 100%;
+    flex: 0 0 auto;         /* kein Sprung in eigene Zeile */
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 8px;               /* gleicher Abstand zwischen INDEX/ABOUT/EN */
+    flex-wrap: nowrap;      /* kein Umbruch */
   }
 
   .nav__link {
