@@ -504,7 +504,7 @@ rgba(0,0,0,0.9)
 
 pointer-events: none;
 }
-}
+
 
 @media (max-width: 720px) {
   #cards .card {
