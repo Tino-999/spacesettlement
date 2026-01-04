@@ -533,3 +533,13 @@ pointer-events: none;
     );
   }
 }
+
+html, body {
+  min-height: 100%;
+  background: #000;
+}
+
+body {
+  min-height: 100vh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
