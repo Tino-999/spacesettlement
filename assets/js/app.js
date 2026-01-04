@@ -679,3 +679,21 @@ async function init() {
 
 init();
 
+// Show "Admin" link only if Cloudflare Access session cookie is present
+(function () {
+  const adminLink = document.getElementById("admin-link");
+  if (!adminLink) return;
+
+  // Cloudflare Access sets CF_Authorization cookie for an active session
+  const hasAccessSession = document.cookie
+    .split(";")
+    .some((c) => c.trim().startsWith("CF_Authorization="));
+
+  if (hasAccessSession) {
+    adminLink.style.display = "inline-block";
+    adminLink.removeAttribute("hidden");
+  } else {
+    adminLink.style.display = "none";
+    adminLink.setAttribute("hidden", "hidden");
+  }
+})();
