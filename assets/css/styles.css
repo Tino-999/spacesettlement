@@ -546,7 +546,7 @@ body {
 
 @media (max-width: 520px) {
   .nav {
-    gap: 10px;
+    gap: 6px;
     flex-wrap: wrap;
     justify-content: flex-end;
   }
