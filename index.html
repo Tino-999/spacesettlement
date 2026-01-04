@@ -15,7 +15,7 @@
       <a class="brand" href="index.html">SPACESETTLEMENT</a>
       <nav class="nav">
         <a class="nav__link" href="library.html">Index</a>
-	<a class="brand" href="admin.html">Admin</a>
+	      <a href="/admin" id="admin-link" style="display:none">Admin</a>
         <a class="nav__link" href="pages/about.html">About</a>
       </nav>
     </div>
@@ -39,6 +39,19 @@
       <span class="hint">monochrome / minimal / curated</span>
     </div>
   </main>
+
+  <script>
+(async () => {
+  try {
+    const res = await fetch('/admin', { method: 'HEAD' });
+    if (res.ok || res.status === 302) {
+      document.getElementById('admin-link').style.display = 'inline-block';
+    }
+  } catch (e) {
+    // nichts tun → Admin bleibt versteckt
+  }
+})();
+</script>
 
   <script defer src="assets/js/art.js"></script>
 </body>
