@@ -81,7 +81,7 @@ border: 1px solid rgba(255,255,255,0.12) !important;
       <a class="brand" href="index.html">SPACESETTLEMENT</a>
       <nav class="nav">
         <a class="nav__link is-active" href="library.html">Index</a>
-        <a class="nav__link" href="admin.html">Admin</a>
+        <a href="/admin" id="admin-link" style="display:none;">ADMIN</a>
         <a class="nav__link" href="pages/about.html">About</a>
       </nav>
     </div>
@@ -218,6 +218,21 @@ border: 1px solid rgba(255,255,255,0.12) !important;
   }
 })();
 </script>
+
+<script>
+(async () => {
+  try {
+    const res = await fetch('/admin', { method: 'HEAD' });
+    if (res.ok || res.status === 302) {
+      const a = document.getElementById('admin-link');
+      if (a) a.style.display = 'inline-block';
+    }
+  } catch (_) {
+    // Admin bleibt verborgen
+  }
+})();
+</script>
+
 
 </body>
 </html>
