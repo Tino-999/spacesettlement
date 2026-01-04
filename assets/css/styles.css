@@ -543,3 +543,15 @@ body {
   min-height: 100vh;
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+@media (max-width: 520px) {
+  .nav { gap: 10px; }
+  .nav__link { padding: 8px 8px; }
+}
+
+@media (max-width: 520px) {
+  .nav {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
