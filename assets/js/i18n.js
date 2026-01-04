@@ -1,6 +1,9 @@
 const DEFAULT = "en";
 const lang = localStorage.getItem("lang") || DEFAULT;
 
+// Browser über die aktuelle Sprache informieren
+document.documentElement.lang = lang;
+
 const EN = {
   "about.text": "This site is not a manifesto. It does not say space settlement is necessary. It does not say space settlement is the only path. This site is also not a wiki. It is not meant to be complete. It is meant to spark thinking."
 };
