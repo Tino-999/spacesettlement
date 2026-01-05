@@ -1,1 +1,0 @@
-ALTER TABLE items ADD COLUMN budgetBillionUSD REAL;
