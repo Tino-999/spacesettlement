@@ -1,0 +1,18 @@
+/* assets/css/admin.css */
+/* Admin-specific layout helpers for i18n workflow */
+
+.admin-i18n { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); }
+.admin-i18n__head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 10px; }
+.admin-badges { display:flex; gap:8px; flex-wrap:wrap; }
+.admin-badge { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.14); opacity:.9; }
+.admin-badge--ok { }
+.admin-badge--warn { opacity:.85; }
+.admin-i18n__grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.admin-i18n__col { display:flex; flex-direction:column; gap:8px; }
+.admin-i18n__label { font-size:12px; opacity:.85; }
+.admin-i18n__box { white-space: pre-wrap; }
+.admin-i18n__row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.admin-i18n__hint { font-size:12px; opacity:.7; }
+@media (max-width: 900px) {
+  .admin-i18n__grid { grid-template-columns: 1fr; }
+}

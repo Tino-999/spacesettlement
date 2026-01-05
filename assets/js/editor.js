@@ -8,6 +8,9 @@ let ITEMS_URL = "";
 let UPLOAD_URL = "";
 let TITLE_SUGGEST_URL = "";
 let AI_ENRICH_URL = "";
+let I18N_ADMIN_URL = "";
+let I18N_PUBLISH_URL = "";
+let I18N_TRANSLATE_EN_URL = "";
 
 let SELECTED_ID = null;
 
@@ -75,6 +78,9 @@ async function init() {
   UPLOAD_URL = `${WORKER_BASE}/upload-image`;
   TITLE_SUGGEST_URL = `${WORKER_BASE}/suggest-title`;
   AI_ENRICH_URL = `${WORKER_BASE}/ai/enrich`;
+  I18N_ADMIN_URL = `${WORKER_BASE}/admin/i18n`;
+  I18N_PUBLISH_URL = `${WORKER_BASE}/admin/i18n/publish`;
+  I18N_TRANSLATE_EN_URL = `${WORKER_BASE}/admin/i18n/translate/en`;
 
   await refreshPublishedList();
 }
@@ -411,6 +417,7 @@ function renderPublished(items) {
       const it = items.find((x) => String(x.id) === String(id));
       if (!it) return;
       fillForm(it);
+      loadI18nForEntry(it.id).catch(console.error);
       setOutput({ selected: it.id });
     });
   });
@@ -444,6 +451,149 @@ function fillForm(it) {
   // Preview image
   const preview = $("imagePreview");
   if (preview) preview.src = it.imageUrl || "";
+}
+
+
+async function loadI18nForEntry(entryId) {
+  const statusBox = $("i18nStatus");
+  const deTitlePub = $("de_title_published");
+  const deSummaryPub = $("de_summary_published");
+  const enTitleDraft = $("en_title_draft");
+  const enSummaryDraft = $("en_summary_draft");
+  const enTitlePub = $("en_title_published");
+  const enSummaryPub = $("en_summary_published");
+
+  if (statusBox) statusBox.innerHTML = "";
+
+  if (!I18N_ADMIN_URL || !entryId) return;
+
+  const token = requireAdminToken("load i18n");
+  const u = new URL(I18N_ADMIN_URL);
+  u.searchParams.set("entry_id", entryId);
+
+  const r = await fetch(u.toString(), {
+    headers: { "x-admin-token": token },
+    cache: "no-store",
+  });
+
+  const data = await r.json().catch(() => ({}));
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+
+  const by = {};
+  for (const row of rows) {
+    const k = String(row.key || "");
+    const lang = String(row.lang || "");
+    by[`${k}::${lang}`] = row;
+  }
+
+  const titleKey = `item.${entryId}.title`;
+  const summaryKey = `item.${entryId}.summary`;
+
+  const deTitle = by[`${titleKey}::de`];
+  const deSummary = by[`${summaryKey}::de`];
+  const enTitle = by[`${titleKey}::en`];
+  const enSummary = by[`${summaryKey}::en`];
+
+  if (deTitlePub) deTitlePub.value = (deTitle?.published || "").trim();
+  if (deSummaryPub) deSummaryPub.value = (deSummary?.published || "").trim();
+
+  if (enTitleDraft) enTitleDraft.value = (enTitle?.draft || "").trim();
+  if (enSummaryDraft) enSummaryDraft.value = (enSummary?.draft || "").trim();
+
+  if (enTitlePub) enTitlePub.value = (enTitle?.published || "").trim();
+  if (enSummaryPub) enSummaryPub.value = (enSummary?.published || "").trim();
+
+  // badges
+  if (statusBox) {
+    const mk = (txt, cls="") => `<span class="admin-badge ${cls}">${txt.replace(/</g,"&lt;")}</span>`;
+    const deState = (deTitle?.published && deSummary?.published) ? "DE: published" : "DE: missing";
+    const enState =
+      (enTitle?.published && enSummary?.published) ? "EN: published" :
+      (enTitle?.draft || enSummary?.draft) ? "EN: draft" :
+      "EN: missing";
+    statusBox.innerHTML = mk(deState, "admin-badge--ok") + mk(enState, enState.includes("missing") ? "admin-badge--warn" : "admin-badge--ok");
+  }
+}
+
+async function publishDeForEntry(entryId) {
+  if (!entryId) return;
+  if (!I18N_PUBLISH_URL) return;
+
+  const token = requireAdminToken("publish DE");
+  const titleKey = `item.${entryId}.title`;
+  const summaryKey = `item.${entryId}.summary`;
+
+  // Update drafts from current form fields first
+  await upsertI18nDraft(titleKey, "de", entryId, "title", ($("title")?.value || "").trim());
+  await upsertI18nDraft(summaryKey, "de", entryId, "summary", ($("summary")?.value || "").trim());
+
+  await publishKey(titleKey, "de", token);
+  await publishKey(summaryKey, "de", token);
+
+  await loadI18nForEntry(entryId);
+}
+
+async function translateEnForEntry(entryId) {
+  if (!entryId) return;
+  const token = requireAdminToken("translate EN");
+  const titleKey = `item.${entryId}.title`;
+  const summaryKey = `item.${entryId}.summary`;
+
+  await translateKeyToEn(titleKey, token);
+  await translateKeyToEn(summaryKey, token);
+
+  await loadI18nForEntry(entryId);
+}
+
+async function publishEnForEntry(entryId) {
+  if (!entryId) return;
+  const token = requireAdminToken("publish EN");
+  const titleKey = `item.${entryId}.title`;
+  const summaryKey = `item.${entryId}.summary`;
+
+  // Upsert EN drafts from UI first (optional manual edits)
+  await upsertI18nDraft(titleKey, "en", entryId, "title", ($("en_title_draft")?.value || "").trim());
+  await upsertI18nDraft(summaryKey, "en", entryId, "summary", ($("en_summary_draft")?.value || "").trim());
+
+  await publishKey(titleKey, "en", token);
+  await publishKey(summaryKey, "en", token);
+
+  await loadI18nForEntry(entryId);
+}
+
+async function upsertI18nDraft(key, lang, entry_id, field, draft) {
+  if (!I18N_ADMIN_URL) return;
+  const token = requireAdminToken(`upsert i18n ${lang}`);
+  await fetch(I18N_ADMIN_URL, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-token": token,
+    },
+    body: JSON.stringify({ key, lang, entry_id, field, draft }),
+  });
+}
+
+async function publishKey(key, lang, token) {
+  await fetch(I18N_PUBLISH_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-token": token,
+    },
+    body: JSON.stringify({ key, lang }),
+  });
+}
+
+async function translateKeyToEn(key, token) {
+  await fetch(I18N_TRANSLATE_EN_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-token": token,
+    },
+    body: JSON.stringify({ key }),
+  });
 }
 
 async function refreshPublishedList() {
@@ -495,6 +645,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const genBtn = $("generate");
   if (genBtn) genBtn.addEventListener("click", generateJson);
+
+  const pubDeBtn = $("publishDe");
+  if (pubDeBtn) pubDeBtn.addEventListener("click", async () => {
+    if (!SELECTED_ID) return alert("Select an item first.");
+    await publishDeForEntry(SELECTED_ID);
+  });
+
+  const trEnBtn = $("translateEn");
+  if (trEnBtn) trEnBtn.addEventListener("click", async () => {
+    if (!SELECTED_ID) return alert("Select an item first.");
+    await translateEnForEntry(SELECTED_ID);
+  });
+
+  const pubEnBtn = $("publishEn");
+  if (pubEnBtn) pubEnBtn.addEventListener("click", async () => {
+    if (!SELECTED_ID) return alert("Select an item first.");
+    await publishEnForEntry(SELECTED_ID);
+  });
 
   const refreshBtn = $("refreshList");
   if (refreshBtn) refreshBtn.addEventListener("click", refreshPublishedList);

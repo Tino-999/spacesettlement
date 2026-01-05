@@ -10,6 +10,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Editor — Space Settlement</title>
   <link rel="stylesheet" href="assets/css/styles.css" />
+  <link rel="stylesheet" href="assets/css/admin.css" />
 </head>
 
 <body class="bg">
@@ -116,6 +117,38 @@
             <label>Summary</label>
             <textarea id="summary" class="input" rows="4"></textarea>
 
+            
+            <div class="admin-i18n">
+              <div class="admin-i18n__head">
+                <div class="card__kicker">i18n (DE/EN)</div>
+                <div id="i18nStatus" class="admin-badges"></div>
+              </div>
+
+              <div class="admin-i18n__grid">
+                <div class="admin-i18n__col">
+                  <div class="admin-i18n__label">DE published</div>
+                  <<input id="de_title_published" class="input" readonly />
+                  <textarea id="de_summary_published" class="input admin-i18n__box" rows="4" readonly></textarea>
+                  <div class="admin-i18n__hint">Published DE is used for fallback and EN translation.</div>
+                  <button id="publishDe" class="btn" type="button">DE freigeben (Title + Summary)</button>
+                </div>
+
+                <div class="admin-i18n__col">
+                  <div class="admin-i18n__label">EN draft</div>
+                  <<input id="en_title_draft" class="input" />
+                  <textarea id="en_summary_draft" class="input admin-i18n__box" rows="4"></textarea>
+                  <div class="admin-i18n__row">
+                    <button id="translateEn" class="btn btn--ghost" type="button">EN automatisch übersetzen</button>
+                    <button id="publishEn" class="btn" type="button">EN freigeben</button>
+                  </div>
+
+                  <div class="admin-i18n__label" style="margin-top:10px;">EN published</div>
+                  <<input id="en_title_published" class="input" readonly />
+                  <textarea id="en_summary_published" class="input admin-i18n__box" rows="4" readonly></textarea>
+                </div>
+              </div>
+            </div>
+
             <label>Tags (comma separated)</label>
             <input id="tags" class="input" placeholder="habitats, infrastructure" />
 
@@ -186,7 +219,7 @@
             <div class="ctaRow">
               <button id="generate" class="btn" type="button">Generate JSON</button>
               <button id="autofill" class="btn btn--ghost" type="button">Auto-Fill (AI)</button>
-              <button id="publish" class="btn" type="button">OK / Publish</button>
+              <button id="publish" class="btn" type="button">Save (Draft)</button>
               <button id="refreshList" class="btn btn--ghost" type="button">Refresh list</button>
             </div>
 
