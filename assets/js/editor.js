@@ -274,6 +274,21 @@ async function aiEnrich() {
     if ($("tags") && Array.isArray(data?.tags)) $("tags").value = data.tags.join(", ");
 
     setOutput({ ok: true, enrich: data });
+// NEW: keep DE i18n drafts in sync with the main form fields.
+// This enables a smooth workflow: Auto-enrich -> review -> DE publish -> EN translate.
+if (SELECTED_ID) {
+  const entryId = SELECTED_ID;
+  const titleKey = `item.${entryId}.title`;
+  const summaryKey = `item.${entryId}.summary`;
+  try {
+    await upsertI18nDraft(titleKey, "de", entryId, "title", ($("title")?.value || "").trim());
+    await upsertI18nDraft(summaryKey, "de", entryId, "summary", ($("summary")?.value || "").trim());
+    await loadI18nForEntry(entryId);
+  } catch (e) {
+    console.warn("[editor] i18n draft sync after enrich failed", e);
+  }
+}
+
   } catch (e) {
     setOutput("AI enrich error:\n" + (e?.message || e));
   } finally {
@@ -332,8 +347,20 @@ async function createItem() {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return setOutput(`Create failed (${r.status}).\n${data?.error || ""}`);
 
-  setOutput({ ok: true, created: data });
-  await refreshPublishedList();
+setOutput({ ok: true, created: data });
+
+// NEW: auto-select newly created item so DE publish / EN translate works immediately
+const newId = data?.id || data?.item?.id || data?.created?.id || null;
+if (newId) {
+  SELECTED_ID = newId;
+  try {
+    const merged = { ...payload, id: newId };
+    fillForm(merged);
+  } catch (_) {}
+  loadI18nForEntry(newId).catch(console.error);
+}
+
+await refreshPublishedList();
 }
 
 async function updateItem(id) {
@@ -359,8 +386,15 @@ async function updateItem(id) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return setOutput(`Update failed (${r.status}).\n${data?.error || ""}`);
 
-  setOutput({ ok: true, updated: data });
-  await refreshPublishedList();
+setOutput({ ok: true, updated: data });
+
+// NEW: keep selection and refresh i18n status
+if (id) {
+  SELECTED_ID = id;
+  loadI18nForEntry(id).catch(console.error);
+}
+
+await refreshPublishedList();
 }
 
 async function deleteItem(id) {
@@ -511,7 +545,7 @@ async function loadI18nForEntry(entryId) {
       (enTitle?.published && enSummary?.published) ? "EN: published" :
       (enTitle?.draft || enSummary?.draft) ? "EN: draft" :
       "EN: missing";
-    statusBox.innerHTML = mk(deState, "admin-badge--ok") + mk(enState, enState.includes("missing") ? "admin-badge--warn" : "admin-badge--ok");
+    statusBox.innerHTML = mk(deState, deState.includes("missing") ? "admin-badge--warn" : "admin-badge--ok") + mk(enState, enState.includes("missing") ? "admin-badge--warn" : "admin-badge--ok");
   }
 }
 
