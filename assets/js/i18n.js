@@ -1,23 +1,57 @@
 // assets/js/i18n.js
 // Loads i18n JSON from Worker and fills DOM via data-i18n.
 // Languages: de (primary), en (secondary). Fallback: en -> de.
-// API base: ?api= override, else same-origin.
+// API base: ?api= override, else /data/config.json (api or apiBase), else same-origin.
 
 (function () {
-  function getApiBase() {
+  function stripTrailingSlashes(s) {
+    return String(s || "").replace(/\/+$/, "");
+  }
+
+  function getApiBaseFromQuery() {
     const params = new URLSearchParams(location.search);
     const api = params.get("api");
-    if (api) return api.replace(/\/+$/, "");
-    return ""; // same-origin
+    if (api) return stripTrailingSlashes(api);
+    return null;
+  }
+
+  async function getApiBaseFromConfig() {
+    try {
+      const res = await fetch("/data/config.json", { cache: "no-store" });
+      if (!res.ok) return null;
+      const cfg = await res.json();
+      // support both keys
+      const api = cfg.api || cfg.apiBase;
+      if (!api) return null;
+      return stripTrailingSlashes(api);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function resolveApiBase() {
+    // 1) ?api=
+    const q = getApiBaseFromQuery();
+    if (q) return q;
+
+    // 2) /data/config.json
+    const c = await getApiBaseFromConfig();
+    if (c) return c;
+
+    // 3) same-origin fallback (may fail if site does not serve /i18n/*.json)
+    return "";
   }
 
   function getSavedLang() {
     const v = (localStorage.getItem("lang") || "").toLowerCase();
-    return (v === "de" || v === "en") ? v : null;
+    return v === "de" || v === "en" ? v : null;
   }
 
   function detectDeviceLang() {
-    const device = String((navigator.languages && navigator.languages[0]) || navigator.language || "en").toLowerCase();
+    const device = String(
+      (navigator.languages && navigator.languages[0]) || navigator.language || "en"
+    ).toLowerCase();
+
     if (device.startsWith("de")) return "de";
     if (device.startsWith("en")) return "en";
     return "en";
@@ -39,7 +73,6 @@
 
   function normalizeValue(v) {
     if (!isNonEmptyString(v)) return "";
-    // Unescape common sequences stored in JSON (e.g., "\\n")
     let s = v;
     s = s.replace(/\\n/g, "\n");
     s = s.replace(/\\t/g, "\t");
@@ -51,21 +84,19 @@
     nodes.forEach((el) => {
       const key = el.getAttribute("data-i18n");
       if (!key) return;
+
       const raw = dict[key];
       if (!isNonEmptyString(raw)) return;
 
       const val = normalizeValue(raw);
-
-      // If the value contains newlines, ensure it renders as intended
-      if (val.includes("\n")) {
-        el.style.whiteSpace = "pre-wrap";
-      }
+      if (val.includes("\n")) el.style.whiteSpace = "pre-wrap";
       el.textContent = val;
     });
   }
 
   async function loadAndApply(lang) {
-    const base = getApiBase();
+    const base = await resolveApiBase();
+
     const deUrl = `${base}/i18n/de.json`;
     const enUrl = `${base}/i18n/en.json`;
 
@@ -83,7 +114,6 @@
       en = {};
     }
 
-    // Merge: de base + en overlay (only non-empty strings)
     const merged = { ...de };
     for (const [k, v] of Object.entries(en || {})) {
       if (isNonEmptyString(v)) merged[k] = v;
@@ -103,11 +133,9 @@
 
     t.addEventListener("click", (e) => {
       e.preventDefault();
-      const next = (lang === "de") ? "en" : "de";
+      const next = lang === "de" ? "en" : "de";
       localStorage.setItem("lang", next);
-
-      // reload and keep query string (?api=...)
-      location.reload();
+      location.reload(); // keeps query string
     });
   }
 
