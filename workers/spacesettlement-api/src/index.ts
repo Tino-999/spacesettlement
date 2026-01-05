@@ -33,12 +33,13 @@ const CORS_HEADERS: Record<string, string> = {
 "Access-Control-Max-Age": "86400",
 };
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
 return new Response(JSON.stringify(data), {
 status,
 headers: {
 ...CORS_HEADERS,
 "Content-Type": "application/json; charset=utf-8",
+...extraHeaders,
 },
 });
 }
@@ -82,6 +83,41 @@ if (token !== configured) return json({ error: "Invalid admin token" }, 403);
 return null;
 }
 
+async function translateDeToEn(deText: string, env: Env): Promise<string> {
+  const apiKey = (env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) throw new Error("Server misconfigured: missing OPENAI_API_KEY");
+
+  const model = (env.OPENAI_MODEL || "gpt-4.1-mini").trim();
+
+  const payload = {
+    model,
+    messages: [
+      { role: "system", content: "Translate German UI/content text to English. Preserve meaning. Keep style neutral and concise. Do not add content." },
+      { role: "user", content: deText }
+    ],
+    temperature: 0.2
+  };
+
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "authorization": `Bearer ${apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(`OpenAI error: ${r.status} ${t}`);
+  }
+
+  const data: any = await r.json();
+  const out = String(data?.choices?.[0]?.message?.content || "").trim();
+  if (!out) throw new Error("Empty translation result");
+  return out;
+}
+
 export default {
 async fetch(request: Request, env: Env): Promise<Response> {
 try {
@@ -95,6 +131,127 @@ headers: CORS_HEADERS,
 
 const url = new URL(request.url);
 const path = url.pathname;
+
+// -----------------------
+// i18n (public)
+// GET /i18n/de.json
+// GET /i18n/en.json
+// Returns { key: publishedString } for the requested language.
+// -----------------------
+if (request.method === "GET" && (path === "/i18n/de.json" || path === "/i18n/en.json")) {
+  const lang = path.endsWith("de.json") ? "de" : "en";
+  const rows = await env.DB.prepare(
+    "SELECT key, published FROM i18n_texts WHERE lang = ? AND published IS NOT NULL AND TRIM(published) != ''"
+  ).bind(lang).all();
+  const out: Record<string, string> = {};
+  for (const r of (rows.results || []) as any[]) {
+    out[String(r.key)] = String(r.published);
+  }
+  return json(out, 200, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "public, max-age=60",
+  });
+}
+
+// -----------------------
+// i18n (admin)
+// GET /admin/i18n?entry_id=<id>  -> returns rows for one entry (or global if entry_id missing)
+// PUT /admin/i18n               -> upsert draft/published for one key+lang
+// POST /admin/i18n/publish      -> { key, lang } sets published = draft
+// POST /admin/i18n/translate/en -> { key } uses de.published -> en.draft
+// -----------------------
+if (path.startsWith("/admin/i18n")) {
+  const guard = requireAdmin(request, env);
+  if (guard) return guard;
+
+  if (request.method === "GET" && path === "/admin/i18n") {
+    const entryId = String(url.searchParams.get("entry_id") || "").trim();
+    const q = entryId
+      ? env.DB.prepare("SELECT key, lang, field, draft, published, updated_at FROM i18n_texts WHERE entry_id = ? ORDER BY field, lang").bind(entryId)
+      : env.DB.prepare("SELECT key, lang, field, draft, published, updated_at FROM i18n_texts WHERE entry_id IS NULL ORDER BY field, lang");
+    const rows = await q.all();
+    return json({ rows: rows.results || [] }, 200);
+  }
+
+  if (request.method === "PUT" && path === "/admin/i18n") {
+    let body: any;
+    try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
+    const key = String(body?.key || "").trim();
+    const lang = String(body?.lang || "").trim();
+    const field = String(body?.field || "").trim();
+    const entry_id = body?.entry_id == null ? null : String(body.entry_id).trim();
+    const draft = body?.draft == null ? null : String(body.draft);
+    const published = body?.published == null ? null : String(body.published);
+    if (!key) return json({ error: "Missing key" }, 400);
+    if (lang !== "de" && lang !== "en") return json({ error: "Invalid lang" }, 400);
+    if (!field) return json({ error: "Missing field" }, 400);
+
+    await env.DB.prepare(
+      "INSERT INTO i18n_texts (key, lang, entry_id, field, draft, published) VALUES (?, ?, ?, ?, ?, ?) " +
+      "ON CONFLICT(key, lang) DO UPDATE SET entry_id=excluded.entry_id, field=excluded.field, draft=excluded.draft, published=COALESCE(excluded.published, i18n_texts.published)"
+    ).bind(key, lang, entry_id, field, draft, published).run();
+
+    return json({ ok: true }, 200);
+  }
+
+  if (request.method === "POST" && path === "/admin/i18n/publish") {
+    let body: any;
+    try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
+    const key = String(body?.key || "").trim();
+    const lang = String(body?.lang || "").trim();
+    if (!key) return json({ error: "Missing key" }, 400);
+    if (lang !== "de" && lang !== "en") return json({ error: "Invalid lang" }, 400);
+
+    // Set published = draft
+    await env.DB.prepare(
+      "UPDATE i18n_texts SET published = draft WHERE key = ? AND lang = ?"
+    ).bind(key, lang).run();
+
+    // If this is an item title/summary in DE, keep items.title/items.summary in sync for existing UI.
+    if (lang === "de") {
+      const m = /^item\.([0-9a-fA-F-]+)\.(title|summary)$/.exec(key);
+      if (m) {
+        const itemId = m[1];
+        const field = m[2];
+        const row = await env.DB.prepare("SELECT published FROM i18n_texts WHERE key = ? AND lang = 'de'").bind(key).first();
+        const val = row?.published == null ? "" : String((row as any).published);
+        if (field === "title") {
+          await env.DB.prepare("UPDATE items SET title = ? WHERE id = ?").bind(val, itemId).run();
+        } else if (field === "summary") {
+          await env.DB.prepare("UPDATE items SET summary = ? WHERE id = ?").bind(val, itemId).run();
+        }
+      }
+    }
+
+    return json({ ok: true }, 200);
+  }
+
+  if (request.method === "POST" && path === "/admin/i18n/translate/en") {
+    let body: any;
+    try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
+    const key = String(body?.key || "").trim();
+    if (!key) return json({ error: "Missing key" }, 400);
+
+    const deRow = await env.DB.prepare(
+      "SELECT published FROM i18n_texts WHERE key = ? AND lang = 'de'"
+    ).bind(key).first();
+
+    const deText = deRow?.published == null ? "" : String((deRow as any).published);
+    if (!deText.trim()) return json({ error: "Missing de.published for key" }, 400);
+
+    const enDraft = await translateDeToEn(deText, env);
+
+    await env.DB.prepare(
+      "INSERT INTO i18n_texts (key, lang, entry_id, field, draft, published) " +
+      "SELECT key, 'en', entry_id, field, ?, published FROM i18n_texts WHERE key = ? AND lang = 'de' " +
+      "ON CONFLICT(key, lang) DO UPDATE SET draft=excluded.draft"
+    ).bind(enDraft, key).run();
+
+    return json({ ok: true, draft: enDraft }, 200);
+  }
+
+  return json({ error: "Not found" }, 404);
+}
 
 // -----------------------
 // GET /items
@@ -221,6 +378,23 @@ item.createdAt
 )
 .run();
 
+
+// Create initial i18n rows for title/summary (DE draft+published).
+try {
+  const titleKey = `item.${item.id}.title`;
+  const summaryKey = `item.${item.id}.summary`;
+
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO i18n_texts (key, lang, entry_id, field, draft, published) VALUES (?, 'de', ?, 'title', ?, ?)"
+  ).bind(titleKey, item.id, item.title, item.title).run();
+
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO i18n_texts (key, lang, entry_id, field, draft, published) VALUES (?, 'de', ?, 'summary', ?, ?)"
+  ).bind(summaryKey, item.id, item.summary, item.summary).run();
+} catch (e) {
+  console.warn("[i18n] seed failed", e);
+}
+
 return json(item, 200);
 }
 
@@ -283,6 +457,25 @@ const row = await env.DB.prepare(
 .first();
 
 if (!row) return json({ error: "Not found" }, 404);
+
+
+// Update DE drafts for title/summary keys (do not auto-publish).
+try {
+  const titleKey = `item.${id}.title`;
+  const summaryKey = `item.${id}.summary`;
+
+  await env.DB.prepare(
+    "INSERT INTO i18n_texts (key, lang, entry_id, field, draft, published) VALUES (?, 'de', ?, 'title', ?, NULL) " +
+    "ON CONFLICT(key, lang) DO UPDATE SET draft=excluded.draft"
+  ).bind(titleKey, id, title).run();
+
+  await env.DB.prepare(
+    "INSERT INTO i18n_texts (key, lang, entry_id, field, draft, published) VALUES (?, 'de', ?, 'summary', ?, NULL) " +
+    "ON CONFLICT(key, lang) DO UPDATE SET draft=excluded.draft"
+  ).bind(summaryKey, id, String(body?.summary || "").trim()).run();
+} catch (e) {
+  console.warn("[i18n] update draft failed", e);
+}
 
 return json(
 {

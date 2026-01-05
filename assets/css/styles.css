@@ -561,3 +561,7 @@ body {
     letter-spacing: .14em;
   }
 }
+
+
+/* Language toggle */
+.lang-switch{display:inline-flex;gap:8px;align-items:center;}
