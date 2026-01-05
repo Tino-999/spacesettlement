@@ -558,7 +558,7 @@ function render(items) {
             <div class="card__content">
               <div class="card__kicker">${escapeHtml(type)}</div>
 
-              <h2 class="card__title">
+              <h2 class="card__title" data-i18n="${`item.${item.id}.title`}">
                 ${
                   hasLink
                     ? `<a href="${href}" target="_blank" rel="noopener">${title}</a>`
@@ -566,7 +566,7 @@ function render(items) {
                 }
               </h2>
 
-              ${summary ? `<p class="card__summary">${summary}</p>` : ""}
+              ${summary ? `<p class="card__summary" data-i18n="${`item.${item.id}.summary`}">${summary}</p>` : ""}
 
               ${factsHtml}
 
@@ -697,3 +697,7 @@ init();
     adminLink.setAttribute("hidden", "hidden");
   }
 })();
+
+
+// Re-apply i18n after render
+if (window.applyI18n) window.applyI18n();

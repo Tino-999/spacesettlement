@@ -82,7 +82,8 @@ border: 1px solid rgba(255,255,255,0.12) !important;
       <nav class="nav">
         <a class="nav__link is-active" href="library.html">Index</a>
         <a class="nav__link" href="pages/about.html">About</a>
-      </nav>
+              <a href="#" id="lang-toggle" class="nav__link">DE</a>
+      
     </div>
   </header>
 
@@ -219,7 +220,7 @@ border: 1px solid rgba(255,255,255,0.12) !important;
 <script>
 (async () => {
   try {
-    const res = await fetch('/admin', { method: 'HEAD' });
+    const res = await fetch('admin.html', { method: 'HEAD' });
     if (res.ok || res.status === 302) {
       const a = document.getElementById('admin-link');
       if (a) a.style.display = 'inline-block';
@@ -231,5 +232,6 @@ border: 1px solid rgba(255,255,255,0.12) !important;
 </script>
 
 
+  <script src="assets/js/i18n.js" defer></script>
 </body>
 </html>

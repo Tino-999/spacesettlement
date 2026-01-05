@@ -1,55 +1,127 @@
-const DEFAULT = "en";
-const lang = localStorage.getItem("lang") || DEFAULT;
+// assets/js/i18n.js
+// Loads i18n JSON from Worker and fills DOM via data-i18n.
+// Languages: de (primary), en (secondary). Fallback: en -> de.
+// API base: ?api= override, else same-origin.
 
-// Browser über die aktuelle Sprache informieren
-document.documentElement.lang = lang;
+(function () {
+  function getApiBase() {
+    const params = new URLSearchParams(location.search);
+    const api = params.get("api");
+    if (api) return api.replace(/\/+$/, "");
+    return ""; // same-origin
+  }
 
-const EN = {
-  "about.text": "This site is not a manifesto. It does not say space settlement is necessary. It does not say space settlement is the only path. This site is also not a wiki. It is not meant to be complete. It is meant to spark thinking."
-};
+  function getSavedLang() {
+    const v = (localStorage.getItem("lang") || "").toLowerCase();
+    return (v === "de" || v === "en") ? v : null;
+  }
 
-const DE = {
-  "about.text": `Diese Website ist kein Manifest.
-Sie sagt nicht, dass Space Settlement notwendig ist.
-Sie sagt nicht, dass Space Settlement der einzige Weg ist.
+  function detectDeviceLang() {
+    const device = String((navigator.languages && navigator.languages[0]) || navigator.language || "en").toLowerCase();
+    if (device.startsWith("de")) return "de";
+    if (device.startsWith("en")) return "en";
+    return "en";
+  }
 
-Diese Website ist auch kein Wiki.
-Sie ist nicht als vollständig gedacht.
-Sie soll zum Nachdenken anregen.
+  function resolveLang() {
+    return getSavedLang() || detectDeviceLang();
+  }
 
-Sie sammelt belastbares, überprüfbares Wissen und ordnet es ein.
-Ziel ist es, eine gemeinsame Grundlage für eine nüchterne Diskussion darüber zu schaffen, ob eine dauerhafte menschliche Präsenz jenseits der Erde sinnvoll ist, notwendig ist oder vermeidbar ist.
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`i18n fetch failed: ${res.status} ${url}`);
+    return await res.json();
+  }
 
-Details sind wichtig, aber sie sind nicht das gesamte Argument.
-Der Fokus liegt auf den größeren Randbedingungen und Abwägungen, die die Fragestellung prägen.
+  function isNonEmptyString(v) {
+    return typeof v === "string" && v.trim() !== "";
+  }
 
-Keine Überzeugung.
-Kein Zukunftshype.
-Nur die Fakten und die Struktur, die nötig sind, um die Frage durchzudenken.`
-};
+  function normalizeValue(v) {
+    if (!isNonEmptyString(v)) return "";
+    // Unescape common sequences stored in JSON (e.g., "\\n")
+    let s = v;
+    s = s.replace(/\\n/g, "\n");
+    s = s.replace(/\\t/g, "\t");
+    return s;
+  }
 
-// Fallback: Ziel überschreibt EN
-const dict = (lang === "de") ? { ...EN, ...DE } : EN;
+  function applyToDom(dict) {
+    const nodes = document.querySelectorAll("[data-i18n]");
+    nodes.forEach((el) => {
+      const key = el.getAttribute("data-i18n");
+      if (!key) return;
+      const raw = dict[key];
+      if (!isNonEmptyString(raw)) return;
 
-// Nur Elemente mit data-i18n werden gesetzt
-if (lang === "de") {
-  document.querySelectorAll("[data-i18n]").forEach(el => {
-    const key = el.dataset.i18n;
-    if (dict[key]) {
-      el.textContent = dict[key];
+      const val = normalizeValue(raw);
+
+      // If the value contains newlines, ensure it renders as intended
+      if (val.includes("\n")) {
+        el.style.whiteSpace = "pre-wrap";
+      }
+      el.textContent = val;
+    });
+  }
+
+  async function loadAndApply(lang) {
+    const base = getApiBase();
+    const deUrl = `${base}/i18n/de.json`;
+    const enUrl = `${base}/i18n/en.json`;
+
+    const de = await fetchJson(deUrl);
+
+    if (lang === "de") {
+      applyToDom(de);
+      return;
     }
-  });
-}
 
-// Toggle
-const toggle = document.getElementById("lang-toggle");
-if (toggle) {
-  toggle.textContent = lang.toUpperCase();
+    let en = {};
+    try {
+      en = await fetchJson(enUrl);
+    } catch (_) {
+      en = {};
+    }
 
-  toggle.addEventListener("click", (e) => {
-    e.preventDefault();
-    const next = (lang === "en") ? "de" : "en";
-    localStorage.setItem("lang", next);
-    location.reload();
+    // Merge: de base + en overlay (only non-empty strings)
+    const merged = { ...de };
+    for (const [k, v] of Object.entries(en || {})) {
+      if (isNonEmptyString(v)) merged[k] = v;
+    }
+    applyToDom(merged);
+  }
+
+  function setToggleLabel(lang) {
+    const t = document.getElementById("lang-toggle");
+    if (!t) return;
+    t.textContent = String(lang).toUpperCase();
+  }
+
+  function bindToggle(lang) {
+    const t = document.getElementById("lang-toggle");
+    if (!t) return;
+
+    t.addEventListener("click", (e) => {
+      e.preventDefault();
+      const next = (lang === "de") ? "en" : "de";
+      localStorage.setItem("lang", next);
+
+      // reload and keep query string (?api=...)
+      location.reload();
+    });
+  }
+
+  // Expose for dynamic renders (cards)
+  window.applyI18n = async function () {
+    const lang = resolveLang();
+    setToggleLabel(lang);
+    await loadAndApply(lang);
+  };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const lang = resolveLang();
+    setToggleLabel(lang);
+    bindToggle(lang);
+    loadAndApply(lang).catch((e) => console.error(e));
   });
-}
+})();
