@@ -1,24 +1,13 @@
 // assets/js/app.js
 // Loads items from Cloudflare Worker /items (D1) and renders cards.
-// Search + type filter (chips) + subfilters:
-// - Projects: project_class (CLASS I–V)
-// - Fiction: fiction_class (CLASS A–D)
-// - Topics: meta.topicGroup (e.g., LAW / RELIGION / SETTLEMENT ARCHITECTURES)
-//
-// API base resolution:
-// 1) ?api= override
-// 2) data/config.json (apiBase)
-// 3) fallback staging worker
 
 /* ---------------- API base ---------------- */
 
 async function loadApiBase() {
-  // 1) URL override
   const params = new URLSearchParams(location.search);
   const apiParam = params.get("api");
   if (apiParam) return apiParam.replace(/\/+$/, "");
 
-  // 2) data/config.json (optional)
   try {
     const res = await fetch("data/config.json", { cache: "no-store" });
     if (res.ok) {
@@ -29,8 +18,7 @@ async function loadApiBase() {
     }
   } catch (_) {}
 
-  // 3) fallback (staging)
- return "https://spacesettlement-api.tinoschuldt100.workers.dev";
+  return "https://spacesettlement-api.tinoschuldt100.workers.dev";
 }
 
 let WORKER_BASE = "";
@@ -44,22 +32,20 @@ const els = {
   year: document.getElementById("year"),
   typeChips: Array.from(document.querySelectorAll(".chip[data-filter]")),
 
-  // Subfilter containers (hidden by default in HTML)
   projectBox: document.getElementById("project-classes"),
   fictionBox: document.getElementById("fiction-classes"),
   topicBox: document.getElementById("topic-classes"),
 
-  // Subfilter chips
   projectChips: Array.from(document.querySelectorAll(".chip[data-project-class]")),
   fictionChips: Array.from(document.querySelectorAll(".chip[data-fiction-class]")),
   topicChips: Array.from(document.querySelectorAll(".chip[data-topic]")),
 };
 
 let allItems = [];
-let activeFilter = "all";       // type filter
-let activeProjectClass = "all"; // "CLASS I" .. "CLASS V"
-let activeFictionClass = "all"; // "CLASS A" .. "CLASS D"
-let activeTopicGroup = "all";   // "LAW" / "RELIGION" / "SETTLEMENT ARCHITECTURES"
+let activeFilter = "all";
+let activeProjectClass = "all";
+let activeFictionClass = "all";
+let activeTopicGroup = "all";
 
 /* ---------------- helpers ---------------- */
 
@@ -81,7 +67,6 @@ function normalizeText(s) {
 }
 
 function normalizeGroupKey(s) {
-  // Robust match between "LAW" and "Law", "Settlement Architectures" and "SETTLEMENT ARCHITECTURES"
   return normalizeText(s).replace(/\s+/g, " ").trim().toUpperCase();
 }
 
@@ -95,16 +80,11 @@ function safeJsonParse(value) {
   if (value == null) return null;
   if (typeof value === "object") return value;
   if (typeof value !== "string") return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(value); } catch { return null; }
 }
 
 function normalizeTags(tags) {
   if (Array.isArray(tags)) return tags.map(String).map((x) => x.trim()).filter(Boolean);
-
   if (typeof tags === "string") {
     const t = tags.trim();
     if (!t) return [];
@@ -114,13 +94,11 @@ function normalizeTags(tags) {
     } catch {}
     return t.split(",").map((x) => x.trim()).filter(Boolean);
   }
-
   return [];
 }
 
 function normalizeItem(raw) {
   const it = { ...(raw || {}) };
-
   it.tags = normalizeTags(it.tags);
   it.imageUrl = typeof it.imageUrl === "string" ? it.imageUrl.trim() : "";
   it.image = typeof it.image === "string" ? it.image.trim() : "";
@@ -133,7 +111,6 @@ function normalizeItem(raw) {
     it.sortYear = null;
   }
 
-  // Ensure known classification fields exist
   if (typeof it.project_class !== "string") it.project_class = it.project_class ?? null;
   if (typeof it.fiction_class !== "string") it.fiction_class = it.fiction_class ?? null;
 
@@ -150,24 +127,11 @@ function resolveImagePath(item) {
   if (isLikelyUrlOrPath(img)) return img;
 
   const type = String(item?.type ?? "").trim().toLowerCase();
-
   const folderByType = {
-    people: "people",
-    projects: "projects",
-    concepts: "concepts",
-    orgs: "orgs",
-    topics: "topics",
-    books: "books",
-    movies: "movies",
-    fiction: "fiction",
-
-    person: "people",
-    project: "projects",
-    concept: "concepts",
-    org: "orgs",
-    topic: "topics",
-    book: "books",
-    movie: "movies",
+    people: "people", projects: "projects", concepts: "concepts", orgs: "orgs",
+    topics: "topics", books: "books", movies: "movies", fiction: "fiction",
+    person: "people", project: "projects", concept: "concepts", org: "orgs",
+    topic: "topics", book: "books", movie: "movies",
   };
 
   const folder = folderByType[type];
@@ -180,7 +144,7 @@ function toNumberOrNull(v) {
   if (v == null) return null;
   if (typeof v === "string") {
     const t = v.trim();
-    if (!t) return null; // verhindert "" -> 0
+    if (!t) return null;
     const n = Number(t);
     return Number.isFinite(n) ? n : null;
   }
@@ -192,21 +156,13 @@ function toYearOrNull(v) {
   const n = toNumberOrNull(v);
   if (n == null) return null;
   const y = Math.trunc(n);
-  // verhindert 0/NaN und offensichtliche Ausreißer
   if (y < 1000 || y > 3000) return null;
   return y;
 }
 
 function getStartYear(item) {
   const meta = item && typeof item.meta === "object" ? item.meta : null;
-  const candidates = [
-    item?.startyear,
-    item?.startYear,
-    item?.start_year,
-    meta?.startyear,
-    meta?.startYear,
-    meta?.start_year,
-  ];
+  const candidates = [item?.startyear, item?.startYear, item?.start_year, meta?.startyear, meta?.startYear, meta?.start_year];
   for (const c of candidates) {
     const y = toYearOrNull(c);
     if (y != null) return y;
@@ -216,14 +172,7 @@ function getStartYear(item) {
 
 function getEndYear(item) {
   const meta = item && typeof item.meta === "object" ? item.meta : null;
-  const candidates = [
-    item?.endyear,
-    item?.endYear,
-    item?.end_year,
-    meta?.endyear,
-    meta?.endYear,
-    meta?.end_year,
-  ];
+  const candidates = [item?.endyear, item?.endYear, item?.end_year, meta?.endyear, meta?.endYear, meta?.end_year];
   for (const c of candidates) {
     const y = toYearOrNull(c);
     if (y != null) return y;
@@ -234,14 +183,8 @@ function getEndYear(item) {
 function getBudgetBillionUSD(item) {
   const meta = item && typeof item.meta === "object" ? item.meta : null;
   const candidates = [
-    item?.budget,              // Editor: "budget"
-    item?.budgetBillionUSD,
-    item?.budgetBillionUsd,
-    item?.budget_billion_usd,
-    meta?.budget,
-    meta?.budgetBillionUSD,
-    meta?.budgetBillionUsd,
-    meta?.budget_billion_usd,
+    item?.budget, item?.budgetBillionUSD, item?.budgetBillionUsd, item?.budget_billion_usd,
+    meta?.budget, meta?.budgetBillionUSD, meta?.budgetBillionUsd, meta?.budget_billion_usd,
   ];
   for (const c of candidates) {
     const n = toNumberOrNull(c);
@@ -261,41 +204,22 @@ async function loadItems() {
   const res = await fetch(ITEMS_URL, { cache: "no-store" });
   const data = await res.json();
 
-  if (data && typeof data === "object" && Array.isArray(data.items)) {
-    return data.items.map(normalizeItem);
-  }
-  // Backward compatibility if API ever returns a raw array
+  if (data && typeof data === "object" && Array.isArray(data.items)) return data.items.map(normalizeItem);
   if (Array.isArray(data)) return data.map(normalizeItem);
-
   return [];
 }
 
 /* ---------------- filter/sort ---------------- */
 
 const TYPE_MAP = {
-  project: "projects",
-  projects: "projects",
-
+  project: "projects", projects: "projects",
   fiction: "fiction",
-
-  topic: "topics",
-  topics: "topics",
-
-  org: "orgs",
-  orgs: "orgs",
-  organization: "orgs",
-
-  person: "people",
-  people: "people",
-
-  book: "books",
-  books: "books",
-
-  movie: "movies",
-  movies: "movies",
-
-  concept: "concepts",
-  concepts: "concepts"
+  topic: "topics", topics: "topics",
+  org: "orgs", orgs: "orgs", organization: "orgs",
+  person: "people", people: "people",
+  book: "books", books: "books",
+  movie: "movies", movies: "movies",
+  concept: "concepts", concepts: "concepts",
 };
 
 function normalizeTypeForFilter(type) {
@@ -305,17 +229,12 @@ function normalizeTypeForFilter(type) {
 function setActiveChip(filter) {
   activeFilter = filter;
 
-  els.typeChips.forEach((b) => {
-    const isActive = b.dataset.filter === filter;
-    b.classList.toggle("is-active", isActive);
-  });
+  els.typeChips.forEach((b) => b.classList.toggle("is-active", b.dataset.filter === filter));
 
-  // Reset subfilters when switching main category
   if (activeFilter !== "projects") activeProjectClass = "all";
   if (activeFilter !== "fiction") activeFictionClass = "all";
   if (activeFilter !== "topics") activeTopicGroup = "all";
 
-  // Clear active styling on subchips
   els.projectChips.forEach((b) => b.classList.remove("is-active"));
   els.fictionChips.forEach((b) => b.classList.remove("is-active"));
   els.topicChips.forEach((b) => b.classList.remove("is-active"));
@@ -330,10 +249,7 @@ function updateSubChipsVisibility() {
 }
 
 function normalizeKey(v) {
-  return String(v || "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, " ");
+  return String(v || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 function parseMeta(meta) {
@@ -348,42 +264,34 @@ function parseMeta(meta) {
 function passesFilter(item, q, filter) {
   const type = normalizeTypeForFilter(item.type);
 
-  // main type filter
- if (filter !== "all" && (!type || type !== filter)) return false;
+  if (filter !== "all" && (!type || type !== filter)) return false;
 
-  // project class subfilter
   if (type === "projects" && activeProjectClass !== "all") {
-  if (normalizeKey(item.project_class) !== normalizeKey(activeProjectClass)) return false;
-}
+    if (normalizeKey(item.project_class) !== normalizeKey(activeProjectClass)) return false;
+  }
 
-  // fiction class subfilter
   if (type === "fiction" && activeFictionClass !== "all") {
-  if (normalizeKey(item.fiction_class) !== normalizeKey(activeFictionClass)) return false;
-}
+    if (normalizeKey(item.fiction_class) !== normalizeKey(activeFictionClass)) return false;
+  }
 
-  // topic group subfilter (stored in meta.topicGroup by editor.js)
- if (type === "topics" && activeTopicGroup !== "all") {
-  const meta = parseMeta(item.meta);
-  const key = normalizeGroupKey(meta?.topicGroup || "");
-  if (key !== activeTopicGroup) return false;
-}
+  if (type === "topics" && activeTopicGroup !== "all") {
+    const meta = parseMeta(item.meta);
+    const key = normalizeGroupKey(meta?.topicGroup || "");
+    if (key !== activeTopicGroup) return false;
+  }
 
   if (!q) return true;
 
   const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
 
   const hay = [
-    item.title,
-    item.summary,
-    item.href,
+    item.title, item.summary, item.href,
     ...(Array.isArray(item.tags) ? item.tags : []),
     type,
     meta ? JSON.stringify(meta) : "",
     item.project_class || "",
     item.fiction_class || "",
-  ]
-    .map(normalizeText)
-    .join(" ");
+  ].map(normalizeText).join(" ");
 
   return hay.includes(q);
 }
@@ -416,78 +324,19 @@ function renderMediaDefault(imagePath, title) {
 
 function renderMediaBook(imagePath, title) {
   const hasImg = Boolean(String(imagePath || "").trim());
-
   return `
-    <div class="card__media" style="
-      position:relative;
-      display:flex;
-      gap:18px;
-      align-items:stretch;
-      overflow:hidden;
-      border-radius:16px;
-      background:
-        radial-gradient(140% 120% at 18% 35%, rgba(255,255,255,0.12), rgba(0,0,0,0.92));
-    ">
+    <div class="card__media" style="position:relative;display:flex;gap:18px;align-items:stretch;overflow:hidden;border-radius:16px;background:radial-gradient(140% 120% at 18% 35%, rgba(255,255,255,0.12), rgba(0,0,0,0.92));">
+      <div aria-hidden="true" style="position:absolute;inset:0;background:radial-gradient(140% 110% at 18% 38%, rgba(255,255,255,0.12), transparent 58%),linear-gradient(90deg,rgba(255,255,255,0.10) 0%,rgba(120,120,120,0.08) 35%,rgba(0,0,0,0.55) 65%,rgba(0,0,0,0.85) 85%,rgba(0,0,0,0.97) 100%);pointer-events:none;z-index:1;"></div>
 
-      <div aria-hidden="true" style="
-        position:absolute;
-        inset:0;
-        background:
-          radial-gradient(140% 110% at 18% 38%, rgba(255,255,255,0.12), transparent 58%),
-          linear-gradient(
-            90deg,
-            rgba(255,255,255,0.10) 0%,
-            rgba(120,120,120,0.08) 35%,
-            rgba(0,0,0,0.55) 65%,
-            rgba(0,0,0,0.85) 85%,
-            rgba(0,0,0,0.97) 100%
-          );
-        pointer-events:none;
-        z-index:1;
-      "></div>
-
-      <div data-cover style="
-        position:relative;
-        z-index:2;
-        flex:0 0 240px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        padding:14px;
-        border-radius:16px;
-        overflow:hidden;
-        background: transparent;
-      ">
+      <div data-cover style="position:relative;z-index:2;flex:0 0 240px;display:flex;align-items:center;justify-content:center;padding:14px;border-radius:16px;overflow:hidden;background:transparent;">
         ${
           hasImg
-            ? `<img
-                src="${imagePath}"
-                alt=""
-                loading="lazy"
-                onerror="this.style.display='none';"
-                style="
-                  width:100%;
-                  height:100%;
-                  object-fit:contain;
-                  display:block;
-                  border-radius:12px;
-                  filter: grayscale(1) contrast(1.05) brightness(.92);
-                "
-              >`
+            ? `<img src="${imagePath}" alt="" loading="lazy" onerror="this.style.display='none';" style="width:100%;height:100%;object-fit:contain;display:block;border-radius:12px;filter: grayscale(1) contrast(1.05) brightness(.92);">`
             : ``
         }
       </div>
 
-      <div style="
-        position:relative;
-        z-index:2;
-        flex:1;
-        min-height:340px;
-        overflow:hidden;
-        border-radius:16px;
-        background: transparent;
-      "></div>
-
+      <div style="position:relative;z-index:2;flex:1;min-height:340px;overflow:hidden;border-radius:16px;background:transparent;"></div>
       <div class="card__fade" aria-hidden="true"></div>
     </div>
   `;
@@ -497,6 +346,16 @@ function renderMedia(type, imagePath, title) {
   const t = String(type || "").toLowerCase();
   if (t === "book" || t === "books") return renderMediaBook(imagePath, title);
   return renderMediaDefault(imagePath, title);
+}
+
+/* ---------------- i18n re-apply ---------------- */
+
+function reapplyI18nSoon() {
+  // i18n.js lädt asynchron; wir versuchen "best-effort" nach DOM-Update.
+  if (typeof window.applyI18n !== "function") return;
+  queueMicrotask(() => {
+    try { window.applyI18n(); } catch (_) {}
+  });
 }
 
 /* ---------------- render ---------------- */
@@ -515,74 +374,63 @@ function render(items) {
         </div>
       </div>
     `;
+    reapplyI18nSoon();
     return;
   }
 
-  els.cards.innerHTML = items
-    .map((item) => {
-      const type = String(item.type || "").toLowerCase();
-      const title = escapeHtml(item.title || "");
-      const href = escapeHtml(item.href || "");
-      const summary = escapeHtml(item.summary || "");
-      const tags = Array.isArray(item.tags) ? item.tags : [];
-      const imagePath = escapeHtml(resolveImagePath(item));
-      const hasLink = href && href !== "kein Wiki";
+  els.cards.innerHTML = items.map((item) => {
+    const type = String(item.type || "").toLowerCase();
+    const titleFallback = escapeHtml(item.title || "");
+    const href = escapeHtml(item.href || "");
+    const summaryFallback = escapeHtml(item.summary || "");
+    const imagePath = escapeHtml(resolveImagePath(item));
+    const hasLink = href && href !== "kein Wiki";
 
-      const start = getStartYear(item);
-      const endRaw = getEndYear(item);
-      const budget = getBudgetBillionUSD(item);
+    const start = getStartYear(item);
+    const endRaw = getEndYear(item);
+    const budget = getBudgetBillionUSD(item);
+    const end = (start != null && endRaw != null && endRaw >= start) ? endRaw : null;
 
-      // Endjahr nur anzeigen, wenn plausibel (>= Startjahr)
-      const end = (start != null && endRaw != null && endRaw >= start) ? endRaw : null;
+    const titleKey = `item.${item.id}.title`;
+    const summaryKey = `item.${item.id}.summary`;
 
-      let factsHtml = "";
-      if (start != null || budget != null) {
-        factsHtml += `<div class="card__facts">`;
+    let factsHtml = "";
+    if (start != null || budget != null) {
+      factsHtml += `<div class="card__facts">`;
+      if (start != null) factsHtml += `<div>Zeitraum: ${end != null ? `${start}-${end}` : start}</div>`;
+      if (budget != null) factsHtml += `<div>Budget: ${escapeHtml(String(budget))} Mrd. USD</div>`;
+      factsHtml += `</div>`;
+    }
 
-        if (start != null) {
-          factsHtml += `<div>Zeitraum: ${end != null ? `${start}-${end}` : start}</div>`;
-        }
+    const titleHtml = hasLink
+      ? `<a href="${href}" target="_blank" rel="noopener" data-i18n="${titleKey}">${titleFallback}</a>`
+      : `<span data-i18n="${titleKey}">${titleFallback}</span>`;
 
-        if (budget != null) {
-          factsHtml += `<div>Budget: ${escapeHtml(String(budget))} Mrd. USD</div>`;
-        }
+    const summaryHtml = summaryFallback
+      ? `<p class="card__summary" data-i18n="${summaryKey}">${summaryFallback}</p>`
+      : ``;
 
-        factsHtml += `</div>`;
-      }
+    return `
+      <article class="card">
+        <div class="card__row">
+          ${renderMedia(type, imagePath, titleFallback)}
 
-      return `
-        <article class="card">
-          <div class="card__row">
-            ${renderMedia(type, imagePath, title)}
+          <div class="card__content">
+            <div class="card__kicker">${escapeHtml(type)}</div>
 
-            <div class="card__content">
-              <div class="card__kicker">${escapeHtml(type)}</div>
+            <h2 class="card__title">
+              ${titleHtml}
+            </h2>
 
-              <h2 class="card__title" data-i18n="${`item.${item.id}.title`}">
-                ${
-                  hasLink
-                    ? `<a href="${href}" target="_blank" rel="noopener">${title}</a>`
-                    : `${title}`
-                }
-              </h2>
-
-              ${summary ? `<p class="card__summary" data-i18n="${`item.${item.id}.summary`}">${summary}</p>` : ""}
-
-              ${factsHtml}
-
-              ${
-                false && tags.length
-                  ? `<div class="card__meta" aria-label="tags">
-                      ${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}
-                     </div>`
-                  : ``
-              }
-            </div>
+            ${summaryHtml}
+            ${factsHtml}
           </div>
-        </article>
-      `;
-    })
-    .join("");
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  reapplyI18nSoon();
 }
 
 /* ---------------- init ---------------- */
@@ -591,7 +439,6 @@ function applyAndRender() {
   const q = normalizeText(els.q?.value || "");
   const filtered = allItems.filter((it) => passesFilter(it, q, activeFilter));
 
-  // Sortierung nach Startjahr absteigend (falls vorhanden)
   filtered.sort((a, b) => {
     const ay = getStartYear(a);
     const by = getStartYear(b);
@@ -610,8 +457,6 @@ function setActiveSubChip(buttons, activeButton) {
 
 async function init() {
   if (els.year) els.year.textContent = String(new Date().getFullYear());
-
-  // Default: show nothing for subchips until a main filter is selected
   updateSubChipsVisibility();
 
   try {
@@ -630,12 +475,12 @@ async function init() {
         </div>
       `;
     }
+    reapplyI18nSoon();
     return;
   }
 
   allItems = sortItemsByYear(allItems);
 
-  // Type chips
   els.typeChips.forEach((btn) => {
     btn.addEventListener("click", () => {
       setActiveChip(btn.dataset.filter || "all");
@@ -643,7 +488,6 @@ async function init() {
     });
   });
 
-  // Project class chips
   els.projectChips.forEach((btn) => {
     btn.addEventListener("click", () => {
       activeProjectClass = String(btn.dataset.projectClass || "").trim() || "all";
@@ -652,7 +496,6 @@ async function init() {
     });
   });
 
-  // Fiction class chips
   els.fictionChips.forEach((btn) => {
     btn.addEventListener("click", () => {
       activeFictionClass = String(btn.dataset.fictionClass || "").trim() || "all";
@@ -661,7 +504,6 @@ async function init() {
     });
   });
 
-  // Topic group chips (normalized)
   els.topicChips.forEach((btn) => {
     btn.addEventListener("click", () => {
       activeTopicGroup = normalizeGroupKey(btn.dataset.topic || "") || "all";
@@ -672,23 +514,18 @@ async function init() {
 
   els.q?.addEventListener("input", () => applyAndRender());
 
-  // Default active type
   setActiveChip("all");
   applyAndRender();
 }
 
 init();
 
-// Show "Admin" link only if Cloudflare Access session cookie is present
+/* Admin link via CF_Authorization cookie */
 (function () {
   const adminLink = document.getElementById("admin-link");
   if (!adminLink) return;
 
-  // Cloudflare Access sets CF_Authorization cookie for an active session
-  const hasAccessSession = document.cookie
-    .split(";")
-    .some((c) => c.trim().startsWith("CF_Authorization="));
-
+  const hasAccessSession = document.cookie.split(";").some((c) => c.trim().startsWith("CF_Authorization="));
   if (hasAccessSession) {
     adminLink.style.display = "inline-block";
     adminLink.removeAttribute("hidden");
@@ -697,7 +534,3 @@ init();
     adminLink.setAttribute("hidden", "hidden");
   }
 })();
-
-
-// Re-apply i18n after render
-if (window.applyI18n) window.applyI18n();

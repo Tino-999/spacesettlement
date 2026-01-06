@@ -11,8 +11,7 @@
   function getApiBaseFromQuery() {
     const params = new URLSearchParams(location.search);
     const api = params.get("api");
-    if (api) return stripTrailingSlashes(api);
-    return null;
+    return api ? stripTrailingSlashes(api) : null;
   }
 
   async function getApiBaseFromConfig() {
@@ -20,26 +19,21 @@
       const res = await fetch("/data/config.json", { cache: "no-store" });
       if (!res.ok) return null;
       const cfg = await res.json();
-      // support both keys
       const api = cfg.api || cfg.apiBase;
-      if (!api) return null;
-      return stripTrailingSlashes(api);
-    } catch (_) {
+      return api ? stripTrailingSlashes(api) : null;
+    } catch {
       return null;
     }
   }
 
   async function resolveApiBase() {
-    // 1) ?api=
     const q = getApiBaseFromQuery();
     if (q) return q;
 
-    // 2) /data/config.json
     const c = await getApiBaseFromConfig();
     if (c) return c;
 
-    // 3) same-origin fallback (may fail if site does not serve /i18n/*.json)
-    return "";
+    return ""; // same-origin
   }
 
   function getSavedLang() {
@@ -74,12 +68,22 @@
   function normalizeValue(v) {
     if (!isNonEmptyString(v)) return "";
     let s = v;
+    // JSON liefert oft echte \n als "\\n" (escaped). Wir machen daraus echte Newlines.
     s = s.replace(/\\n/g, "\n");
     s = s.replace(/\\t/g, "\t");
     return s;
   }
 
+  function setTextPreserveLinks(el, text) {
+    // Wenn das Element Kinder hat (z.B. <a>), und nur das Kind den data-i18n Key trägt,
+    // dann soll i18n.js NICHT den Parent überschreiben. Darum:
+    // - Wir setzen immer nur auf dem Element selbst.
+    el.textContent = text;
+  }
+
   function applyToDom(dict) {
+    window.__I18N_DICT__ = dict;
+
     const nodes = document.querySelectorAll("[data-i18n]");
     nodes.forEach((el) => {
       const key = el.getAttribute("data-i18n");
@@ -89,12 +93,15 @@
       if (!isNonEmptyString(raw)) return;
 
       const val = normalizeValue(raw);
+
+      // Newlines darstellen
       if (val.includes("\n")) el.style.whiteSpace = "pre-wrap";
-      el.textContent = val;
+
+      setTextPreserveLinks(el, val);
     });
   }
 
-  async function loadAndApply(lang) {
+  async function loadDictForLang(lang) {
     const base = await resolveApiBase();
 
     const deUrl = `${base}/i18n/de.json`;
@@ -102,54 +109,76 @@
 
     const de = await fetchJson(deUrl);
 
-    if (lang === "de") {
-      applyToDom(de);
-      return;
-    }
+    if (lang === "de") return de;
 
     let en = {};
     try {
       en = await fetchJson(enUrl);
-    } catch (_) {
+    } catch {
       en = {};
     }
 
+    // Merge: DE baseline, EN overrides if non-empty
     const merged = { ...de };
     for (const [k, v] of Object.entries(en || {})) {
       if (isNonEmptyString(v)) merged[k] = v;
     }
-    applyToDom(merged);
+    return merged;
   }
 
   function setToggleLabel(lang) {
     const t = document.getElementById("lang-toggle");
     if (!t) return;
+    // Optional: Label zeigt die aktuelle Sprache
     t.textContent = String(lang).toUpperCase();
   }
 
-  function bindToggle(lang) {
+  function bindToggle() {
     const t = document.getElementById("lang-toggle");
     if (!t) return;
 
-    t.addEventListener("click", (e) => {
+    t.addEventListener("click", async (e) => {
       e.preventDefault();
-      const next = lang === "de" ? "en" : "de";
+
+      const current = window.__I18N_LANG__ || resolveLang();
+      const next = current === "de" ? "en" : "de";
+
       localStorage.setItem("lang", next);
-      location.reload(); // keeps query string
+      window.__I18N_LANG__ = next;
+      setToggleLabel(next);
+
+      try {
+        const dict = await loadDictForLang(next);
+        applyToDom(dict);
+      } catch (err) {
+        console.error(err);
+      }
+
+      // Signal für app.js / andere Scripts: Sprache hat gewechselt
+      document.dispatchEvent(new CustomEvent("i18n:changed", { detail: { lang: next } }));
     });
+  }
+
+  async function ensureLoadedAndApplied() {
+    const lang = window.__I18N_LANG__ || resolveLang();
+    window.__I18N_LANG__ = lang;
+    setToggleLabel(lang);
+
+    const dict = await loadDictForLang(lang);
+    applyToDom(dict);
   }
 
   // Expose for dynamic renders (cards)
   window.applyI18n = async function () {
-    const lang = resolveLang();
-    setToggleLabel(lang);
-    await loadAndApply(lang);
+    try {
+      await ensureLoadedAndApplied();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   document.addEventListener("DOMContentLoaded", () => {
-    const lang = resolveLang();
-    setToggleLabel(lang);
-    bindToggle(lang);
-    loadAndApply(lang).catch((e) => console.error(e));
+    bindToggle();
+    ensureLoadedAndApplied().catch((e) => console.error(e));
   });
 })();
