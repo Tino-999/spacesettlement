@@ -1,0 +1,82 @@
+openapi: 3.1.0
+info:
+  title: Space Settlement Movie Ingest API
+  version: 1.0.0
+  description: Add a movie to space-settlement.net through the existing worker backend.
+servers:
+  - url: https://spacesettlement-api.tinoschuldt100.workers.dev
+paths:
+  /ingest/movie:
+    post:
+      operationId: ingestMovie
+      summary: Add a movie entry
+      description: Creates a new movie item using title plus optional URL and note.
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  description: Movie title.
+                url:
+                  type: string
+                  format: uri
+                  description: Optional source URL.
+                note:
+                  type: string
+                  description: Optional freeform note.
+                imageUrl:
+                  type: string
+                  format: uri
+                  description: Optional explicit poster URL.
+      responses:
+        '200':
+          description: Movie successfully created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  item:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      type: { type: string }
+                      title: { type: string }
+                      href: { type: string }
+                      imageUrl: { type: string }
+                      summary: { type: string }
+                      tags:
+                        type: array
+                        items: { type: string }
+                  enrichment:
+                    type: object
+                    properties:
+                      href: { type: string }
+                      wikipediaUrl: { type: string }
+                      summary: { type: string }
+                      tags:
+                        type: array
+                        items: { type: string }
+        '400':
+          description: Bad request.
+        '401':
+          description: Missing admin token.
+        '403':
+          description: Invalid admin token.
+        '500':
+          description: Server error.
+components:
+  securitySchemes:
+    adminToken:
+      type: apiKey
+      in: header
+      name: x-admin-token
