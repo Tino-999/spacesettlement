@@ -356,6 +356,8 @@ if (newId) {
   try {
     const merged = { ...payload, id: newId };
     fillForm(merged);
+    if ($("de_title_published")) $("de_title_published").value = payload.title || "";
+if ($("de_summary_published")) $("de_summary_published").value = payload.summary || "";
   } catch (_) {}
   loadI18nForEntry(newId).catch(console.error);
 }
