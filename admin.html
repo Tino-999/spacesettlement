@@ -1,5 +1,14 @@
 <script>
-  const API_BASE = "http://127.0.0.1:8787";
+  (function () {
+    const apiBase = "https://spacesettlement-api.tinoschuldt100.workers.dev";
+    const url = new URL(window.location.href);
+    if (!url.searchParams.get("api")) {
+      url.searchParams.set("api", apiBase);
+      window.location.replace(url.toString());
+      return;
+    }
+    window.__SPACESETTLEMENT_API_BASE__ = apiBase;
+  })();
 </script>
 
 
@@ -127,7 +136,7 @@
               <div class="admin-i18n__grid">
                 <div class="admin-i18n__col">
                   <div class="admin-i18n__label">DE published</div>
-                  <<input id="de_title_published" class="input" readonly />
+                  <input id="de_title_published" class="input" readonly />
                   <textarea id="de_summary_published" class="input admin-i18n__box" rows="4" readonly></textarea>
                   <div class="admin-i18n__hint">Published DE is used for fallback and EN translation.</div>
                   <button id="publishDe" class="btn" type="button">DE freigeben (Title + Summary)</button>
@@ -135,7 +144,7 @@
 
                 <div class="admin-i18n__col">
                   <div class="admin-i18n__label">EN draft</div>
-                  <<input id="en_title_draft" class="input" />
+                  <input id="en_title_draft" class="input" />
                   <textarea id="en_summary_draft" class="input admin-i18n__box" rows="4"></textarea>
                   <div class="admin-i18n__row">
                     <button id="translateEn" class="btn btn--ghost" type="button">EN automatisch übersetzen</button>
@@ -143,7 +152,7 @@
                   </div>
 
                   <div class="admin-i18n__label" style="margin-top:10px;">EN published</div>
-                  <<input id="en_title_published" class="input" readonly />
+                  <input id="en_title_published" class="input" readonly />
                   <textarea id="en_summary_published" class="input admin-i18n__box" rows="4" readonly></textarea>
                 </div>
               </div>
