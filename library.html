@@ -110,18 +110,10 @@ border: 1px solid rgba(255,255,255,0.12) !important;
           <button class="chip" data-filter="people" type="button">people</button>
           <button class="chip" data-filter="books" type="button">books</button>
           <button class="chip" data-filter="movies" type="button">movies</button>
-          <!-- <button class="chip" data-filter="concepts" type="button">concepts</button> -->
           <button class="chip is-active" data-filter="all" type="button">all</button>
         </div>
 
-        <!-- PROJECT CLASSES -->
-        <div
-          id="project-classes"
-          class="chips chips-sub"
-          role="list"
-          aria-label="Project Classes"
-          hidden
-        >
+        <div id="project-classes" class="chips chips-sub" role="list" aria-label="Project Classes" hidden>
           <button class="chip" data-project-class="CLASS I" type="button" data-tooltip="Operational system or process. Proven in use.">class I</button>
           <button class="chip" data-project-class="CLASS II" type="button" data-tooltip="Prototype or pilot validation. Not operationally proven.">class II</button>
           <button class="chip" data-project-class="CLASS III" type="button" data-tooltip="Architecture and interfaces defined. No prototype validation.">class III</button>
@@ -129,38 +121,21 @@ border: 1px solid rgba(255,255,255,0.12) !important;
           <button class="chip" data-project-class="CLASS V" type="button" data-tooltip="Library or curated resources. No end-to-end build path.">class V</button>
         </div>
 
-        <!-- FICTION CLASSES -->
-        <div
-          id="fiction-classes"
-          class="chips chips-sub"
-          role="list"
-          aria-label="Fiction Classes"
-          hidden
-        >
+        <div id="fiction-classes" class="chips chips-sub" role="list" aria-label="Fiction Classes" hidden>
           <button class="chip" data-fiction-class="CLASS A" type="button" data-tooltip="Technically referenced and internally consistent. Not empirically validated.">class A</button>
           <button class="chip" data-fiction-class="CLASS B" type="button" data-tooltip="Some technical reasoning. Important assumptions untested.">class B</button>
           <button class="chip" data-fiction-class="CLASS C" type="button" data-tooltip="Uses real terms. Technical plausibility not argued.">class C</button>
           <button class="chip" data-fiction-class="CLASS D" type="button" data-tooltip="Narrative only. No technical grounding.">class D</button>
         </div>
 
-        <!-- TOPIC GROUPS -->
-        <div
-          id="topic-classes"
-          class="chips chips-sub"
-          role="list"
-          aria-label="Topic Groups"
-          hidden
-        >
+        <div id="topic-classes" class="chips chips-sub" role="list" aria-label="Topic Groups" hidden>
           <button class="chip" data-topic="LAW" type="button" data-tooltip="Legal and governance aspects relevant to space settlement.">law</button>
           <button class="chip" data-topic="RELIGION" type="button" data-tooltip="Religious practice and organization in long-duration off-Earth habitation.">religion</button>
-          <button class="chip" data-topic="SETTLEMENT ARCHITECTURES" type="button" data-tooltip="Habitat and settlement architectures for long-duration presence.">
-            settlement architectures
-          </button>
+          <button class="chip" data-topic="SETTLEMENT ARCHITECTURES" type="button" data-tooltip="Habitat and settlement architectures for long-duration presence.">settlement architectures</button>
         </div>
       </div>
     </section>
 
-    <!-- RESULT CARDS -->
     <section id="cards" class="stack" aria-live="polite"></section>
 
     <footer class="footer">
@@ -216,21 +191,6 @@ border: 1px solid rgba(255,255,255,0.12) !important;
   }
 })();
 </script>
-
-<script>
-(async () => {
-  try {
-    const res = await fetch('admin.html', { method: 'HEAD' });
-    if (res.ok || res.status === 302) {
-      const a = document.getElementById('admin-link');
-      if (a) a.style.display = 'inline-block';
-    }
-  } catch (_) {
-    // Admin bleibt verborgen
-  }
-})();
-</script>
-
 
   <script src="assets/js/i18n.js" defer></script>
 </body>
