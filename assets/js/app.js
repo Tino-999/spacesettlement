@@ -9,7 +9,7 @@ async function loadApiBase() {
   if (apiParam) return apiParam.replace(/\/+$/, "");
 
   try {
-    const res = await fetch("data/config.json", { cache: "no-store" });
+    const res = await fetch("data/config.json");
     if (res.ok) {
       const cfg = await res.json();
       if (cfg && typeof cfg.apiBase === "string" && cfg.apiBase.trim()) {
@@ -201,7 +201,7 @@ async function loadItems() {
     ITEMS_URL = `${WORKER_BASE}/items`;
   }
 
-  const res = await fetch(ITEMS_URL, { cache: "no-store" });
+  const res = await fetch(ITEMS_URL);
   const data = await res.json();
 
   if (data && typeof data === "object" && Array.isArray(data.items)) return data.items.map(normalizeItem);
@@ -351,7 +351,7 @@ function renderMedia(type, imagePath, title) {
 /* ---------------- i18n re-apply ---------------- */
 
 function reapplyI18nSoon() {
-  // i18n.js lädt asynchron; wir versuchen "best-effort" nach DOM-Update.
+  // i18n.js lÃƒÆ’Ã‚Â¤dt asynchron; wir versuchen "best-effort" nach DOM-Update.
   if (typeof window.applyI18n !== "function") return;
   queueMicrotask(() => {
     try { window.applyI18n(); } catch (_) {}
