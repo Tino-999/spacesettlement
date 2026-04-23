@@ -5,49 +5,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Index — Space Settlement</title>
-  <meta name="description" content="People, projects, organizations, and topics advancing space settlement." />
+  <meta name="description" content="People, projects, art, and topics advancing space settlement." />
   <link rel="stylesheet" href="assets/css/styles.css" />
 
 <style>
-/* Tooltips: Desktop Hover + Mobile Long-Press */
-[data-tooltip] {
-  position: relative;
-}
-
-[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 0;
-  top: 100%;
-  margin-top: 0.4rem;
-  padding: 0.4rem 0.6rem;
-  max-width: 20rem;
-
-background: rgba(30, 30, 30, 0.92) !important;
-color: #e0e0e0 !important;
-border: 1px solid rgba(255,255,255,0.12) !important;
-
-  font-size: 0.85rem;
-  line-height: 1.2;
-  border-radius: 0.4rem;
-
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-4px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  z-index: 1000;
-}
-
-[data-tooltip]:hover::after,
-.tooltip-active[data-tooltip]::after {
-  opacity: 1;
-  transform: translateY(0);
-}
-</style>
-
-
-<style>
-/* Tooltips: hover (desktop) and long-press (touch) */
 [data-tooltip] { position: relative; }
 [data-tooltip]::after {
   content: attr(data-tooltip);
@@ -57,20 +18,23 @@ border: 1px solid rgba(255,255,255,0.12) !important;
   margin-top: 0.4rem;
   padding: 0.4rem 0.6rem;
   max-width: 20rem;
-  z-index: 1000;
+  background: rgba(30, 30, 30, 0.92) !important;
+  color: #e0e0e0 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
   font-size: 0.85rem;
   line-height: 1.2;
-  border: 1px solid rgba(0,0,0,0.25);
-  background: rgba(255,255,255,0.98);
-  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
-  border-radius: 0.5rem;
+  border-radius: 0.4rem;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
   transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 1000;
 }
-[data-tooltip]:hover::after { opacity: 1; transform: translateY(0); }
-.tooltip-active[data-tooltip]::after { opacity: 1; transform: translateY(0); pointer-events: auto; }
+[data-tooltip]:hover::after,
+.tooltip-active[data-tooltip]::after {
+  opacity: 1;
+  transform: translateY(0);
+}
 </style>
 
 </head>
@@ -82,8 +46,7 @@ border: 1px solid rgba(255,255,255,0.12) !important;
       <nav class="nav">
         <a class="nav__link is-active" href="library.html">Index</a>
         <a class="nav__link" href="pages/about.html">About</a>
-              <a href="#" id="lang-toggle" class="nav__link">DE</a>
-      
+        <a href="#" id="lang-toggle" class="nav__link">DE</a>
     </div>
   </header>
 
@@ -91,107 +54,29 @@ border: 1px solid rgba(255,255,255,0.12) !important;
     <section class="page__intro">
       <h1 class="page__title">Index</h1>
 
-
       <div class="controls">
-        <input
-          id="q"
-          class="input"
-          type="search"
-          placeholder="search…"
-          autocomplete="off"
-        />
+        <input id="q" class="input" type="search" placeholder="search…" autocomplete="off" />
 
-        <!-- MAIN TYPE FILTERS -->
         <div class="chips" role="list" aria-label="Filters">
           <button class="chip" data-filter="projects" type="button">projects</button>
           <button class="chip" data-filter="fiction" type="button">fiction</button>
           <button class="chip" data-filter="topics" type="button">topics</button>
-          <button class="chip" data-filter="orgs" type="button">orgs</button>
+          <button class="chip" data-filter="art" type="button">art</button>
           <button class="chip" data-filter="people" type="button">people</button>
           <button class="chip" data-filter="books" type="button">books</button>
           <button class="chip" data-filter="movies" type="button">movies</button>
           <button class="chip is-active" data-filter="all" type="button">all</button>
         </div>
 
-        <div id="project-classes" class="chips chips-sub" role="list" aria-label="Project Classes" hidden>
-          <button class="chip" data-project-class="CLASS I" type="button" data-tooltip="Operational system or process. Proven in use.">class I</button>
-          <button class="chip" data-project-class="CLASS II" type="button" data-tooltip="Prototype or pilot validation. Not operationally proven.">class II</button>
-          <button class="chip" data-project-class="CLASS III" type="button" data-tooltip="Architecture and interfaces defined. No prototype validation.">class III</button>
-          <button class="chip" data-project-class="CLASS IV" type="button" data-tooltip="Concept and requirements. No validated architecture.">class IV</button>
-          <button class="chip" data-project-class="CLASS V" type="button" data-tooltip="Library or curated resources. No end-to-end build path.">class V</button>
-        </div>
-
-        <div id="fiction-classes" class="chips chips-sub" role="list" aria-label="Fiction Classes" hidden>
-          <button class="chip" data-fiction-class="CLASS A" type="button" data-tooltip="Technically referenced and internally consistent. Not empirically validated.">class A</button>
-          <button class="chip" data-fiction-class="CLASS B" type="button" data-tooltip="Some technical reasoning. Important assumptions untested.">class B</button>
-          <button class="chip" data-fiction-class="CLASS C" type="button" data-tooltip="Uses real terms. Technical plausibility not argued.">class C</button>
-          <button class="chip" data-fiction-class="CLASS D" type="button" data-tooltip="Narrative only. No technical grounding.">class D</button>
-        </div>
-
-        <div id="topic-classes" class="chips chips-sub" role="list" aria-label="Topic Groups" hidden>
-          <button class="chip" data-topic="LAW" type="button" data-tooltip="Legal and governance aspects relevant to space settlement.">law</button>
-          <button class="chip" data-topic="RELIGION" type="button" data-tooltip="Religious practice and organization in long-duration off-Earth habitation.">religion</button>
-          <button class="chip" data-topic="SETTLEMENT ARCHITECTURES" type="button" data-tooltip="Habitat and settlement architectures for long-duration presence.">settlement architectures</button>
-        </div>
+        <div id="project-classes" class="chips chips-sub" hidden></div>
+        <div id="fiction-classes" class="chips chips-sub" hidden></div>
+        <div id="topic-classes" class="chips chips-sub" hidden></div>
       </div>
     </section>
 
-    <section id="cards" class="stack" aria-live="polite"></section>
-
-    <footer class="footer">
-      <div class="footer__inner">
-        <span>© <span id="year"></span> Space Settlement Index</span>
-        <span class="sep">·</span>
-        <a class="footer__link" href="index.html">Landing</a>
-        <span class="sep">·</span>
-        <a class="footer__link" href="pages/about.html">About</a>
-      </div>
-    </footer>
+    <section id="cards" class="stack"></section>
   </main>
 
   <script defer src="assets/js/app.js"></script>
-
-<script>
-(function () {
-  var isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-  if (!isTouch) return;
-
-  var LONG_PRESS_MS = 500;
-  var pressTimer = null;
-
-  function clearActive() {
-    var active = document.querySelectorAll(".tooltip-active");
-    for (var i = 0; i < active.length; i++) active[i].classList.remove("tooltip-active");
-  }
-
-  function onTouchStart(e) {
-    var el = e.currentTarget;
-    clearActive();
-    pressTimer = window.setTimeout(function () {
-      el.classList.add("tooltip-active");
-    }, LONG_PRESS_MS);
-  }
-
-  function onTouchEnd() {
-    if (pressTimer) window.clearTimeout(pressTimer);
-    pressTimer = null;
-  }
-
-  document.addEventListener("touchstart", function (e) {
-    var t = e.target;
-    if (!t.closest || !t.closest("[data-tooltip]")) clearActive();
-  }, {passive:true});
-
-  var nodes = document.querySelectorAll("[data-tooltip]");
-  for (var i = 0; i < nodes.length; i++) {
-    nodes[i].addEventListener("touchstart", onTouchStart, {passive:true});
-    nodes[i].addEventListener("touchend", onTouchEnd, {passive:true});
-    nodes[i].addEventListener("touchcancel", onTouchEnd, {passive:true});
-    nodes[i].addEventListener("touchmove", onTouchEnd, {passive:true});
-  }
-})();
-</script>
-
-  <script src="assets/js/i18n.js" defer></script>
 </body>
 </html>
