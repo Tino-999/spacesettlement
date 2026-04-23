@@ -131,11 +131,37 @@ function resolveImagePath(item) {
     people: "people", projects: "projects", concepts: "concepts", orgs: "orgs",
     topics: "topics", books: "books", movies: "movies", fiction: "fiction",
     person: "people", project: "projects", concept: "concepts", org: "orgs",
+    art: "orgs", arts: "orgs",
     topic: "topics", book: "books", movie: "movies",
   };
 
   const folder = folderByType[type];
   return folder ? `assets/img/cards/${folder}/${img}` : `assets/img/cards/${img}`;
+}
+
+function getDisplayTypeLabel(type) {
+  const key = String(type || "").trim().toLowerCase();
+  const labels = {
+    project: "project",
+    projects: "project",
+    fiction: "fiction",
+    topic: "topic",
+    topics: "topic",
+    org: "art",
+    orgs: "art",
+    organization: "art",
+    art: "art",
+    arts: "art",
+    person: "person",
+    people: "person",
+    book: "book",
+    books: "book",
+    movie: "movie",
+    movies: "movie",
+    concept: "concept",
+    concepts: "concept",
+  };
+  return labels[key] || key;
 }
 
 /* ---------------- helper: years & budget ---------------- */
@@ -215,7 +241,8 @@ const TYPE_MAP = {
   project: "projects", projects: "projects",
   fiction: "fiction",
   topic: "topics", topics: "topics",
-  org: "orgs", orgs: "orgs", organization: "orgs",
+  org: "art", orgs: "art", organization: "art",
+  art: "art", arts: "art",
   person: "people", people: "people",
   book: "books", books: "books",
   movie: "movies", movies: "movies",
@@ -380,6 +407,7 @@ function render(items) {
 
   els.cards.innerHTML = items.map((item) => {
     const type = String(item.type || "").toLowerCase();
+    const displayType = getDisplayTypeLabel(type);
     const titleFallback = escapeHtml(item.title || "");
     const href = escapeHtml(item.href || "");
     const summaryFallback = escapeHtml(item.summary || "");
@@ -416,7 +444,7 @@ function render(items) {
           ${renderMedia(type, imagePath, titleFallback)}
 
           <div class="card__content">
-            <div class="card__kicker">${escapeHtml(type)}</div>
+            <div class="card__kicker">${escapeHtml(displayType)}</div>
 
             <h2 class="card__title">
               ${titleHtml}
