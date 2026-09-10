@@ -54,6 +54,11 @@
 "env": {
   "production": {
     "name": "spacesettlement-api",
+    // Muss gesetzt bleiben: die Seite spricht laut data/config.json ueber
+    // spacesettlement-api.tinoschuldt100.workers.dev mit der API. Fehlt der
+    // Schluessel, schaltet wrangler die Adresse beim Deploy ab.
+    "workers_dev": true,
+    "preview_urls": false,
     "routes": [
       { "pattern": "space-settlement.net/item/*", "zone_name": "space-settlement.net" },
       { "pattern": "space-settlement.net/sitemap.xml", "zone_name": "space-settlement.net" },

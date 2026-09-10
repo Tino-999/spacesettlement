@@ -214,7 +214,7 @@ ${opts.head}
     <a class="brand" href="/">SPACESETTLEMENT</a>
     <nav class="nav">
       <a class="nav__link" href="/library">${esc(t("index", opts.lang))}</a>
-      <a class="nav__link" href="/pages/about.html">About</a>
+      <a class="nav__link" href="/pages/about">About</a>
     </nav>
   </div>
 </header>
@@ -436,7 +436,7 @@ export function renderSitemap(
   rows: Array<{ id: string; createdAt: string | null }>,
   origin: string
 ): string {
-  const staticPaths = ["/", "/library", "/pages/about.html"];
+  const staticPaths = ["/", "/library", "/pages/about"];
 
   const urls: string[] = [];
 
