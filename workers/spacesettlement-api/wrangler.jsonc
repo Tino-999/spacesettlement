@@ -33,6 +33,53 @@
   }
 ],
 
+/**
+ * Produktion.
+ *
+ * Die Seite spricht mit dem Worker "spacesettlement-api" (siehe
+ * data/config.json), die Konfiguration oben traegt aber den Namen
+ * "spacesettlement-api-staging". Deshalb ist Produktion hier als eigene
+ * Umgebung ausgewiesen, statt den Namen oben stillschweigend zu aendern:
+ *
+ *   npx wrangler deploy --env production
+ *
+ * Die Routen holen genau drei Pfade unter space-settlement.net an diesen
+ * Worker; alles andere bleibt beim bisherigen Hosting der Seite. Eine
+ * engere Route gewinnt in Cloudflare gegen eine weitere, deshalb greift
+ * das auch neben einem bestehenden Catch-all.
+ *
+ * Bindings werden in benannten Umgebungen nicht vererbt und sind daher
+ * wiederholt.
+ */
+"env": {
+  "production": {
+    "name": "spacesettlement-api",
+    "routes": [
+      { "pattern": "space-settlement.net/item/*", "zone_name": "space-settlement.net" },
+      { "pattern": "space-settlement.net/sitemap.xml", "zone_name": "space-settlement.net" },
+      { "pattern": "space-settlement.net/robots.txt", "zone_name": "space-settlement.net" }
+    ],
+    "vars": {
+      "SITE_ORIGIN": "https://space-settlement.net"
+    },
+    "observability": { "enabled": true },
+    "assets": { "directory": "./public" },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "spacesettlement-db",
+        "database_id": "f899bfb4-d418-41b5-8bc8-30b4fb06f6cd"
+      }
+    ],
+    "r2_buckets": [
+      {
+        "binding": "IMAGES",
+        "bucket_name": "spacesettlement-image"
+      }
+    ]
+  }
+},
+
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
