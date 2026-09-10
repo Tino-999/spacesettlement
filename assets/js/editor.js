@@ -11,6 +11,10 @@ let AI_ENRICH_URL = "";
 let I18N_ADMIN_URL = "";
 let I18N_PUBLISH_URL = "";
 let I18N_TRANSLATE_EN_URL = "";
+let RELATIONS_URL = "";
+
+// Zwischenspeicher aller Einträge — Grundlage für die Zielsuche.
+let ALL_ITEMS = [];
 
 let SELECTED_ID = null;
 
@@ -81,8 +85,22 @@ async function init() {
   I18N_ADMIN_URL = `${WORKER_BASE}/admin/i18n`;
   I18N_PUBLISH_URL = `${WORKER_BASE}/admin/i18n/publish`;
   I18N_TRANSLATE_EN_URL = `${WORKER_BASE}/admin/i18n/translate/en`;
+  RELATIONS_URL = `${WORKER_BASE}/relations`;
 
   await refreshPublishedList();
+  await loadAllItems();
+}
+
+// Vollständige Eintragsliste (ohne Type-Filter) für die Zielsuche.
+async function loadAllItems() {
+  if (!ITEMS_URL) return;
+  try {
+    const r = await fetch(ITEMS_URL, { cache: "no-store" });
+    const data = await r.json().catch(() => ({}));
+    ALL_ITEMS = Array.isArray(data?.items) ? data.items : [];
+  } catch (e) {
+    console.warn("[editor] loadAllItems failed", e);
+  }
 }
 
 /* =========================
@@ -320,6 +338,10 @@ function readForm() {
     meta: null, // keep minimal; extend as needed
     budgetBillionUSD: budget === "" ? null : Number(budget),
 
+    verdict: ($("verdict")?.value || "").trim(),
+    reality: ($("reality")?.value || "").trim(),
+    reality_checked: ($("realityChecked")?.value || "").trim(),
+    source_url: ($("sourceUrl")?.value || "").trim(),
   };
 
   return payload;
@@ -360,6 +382,8 @@ if (newId) {
 if ($("de_summary_published")) $("de_summary_published").value = payload.summary || "";
   } catch (_) {}
   loadI18nForEntry(newId).catch(console.error);
+  loadRelationsForEntry(newId).catch(console.error);
+  updateRelationHint();
 }
 
 await refreshPublishedList();
@@ -394,6 +418,8 @@ setOutput({ ok: true, updated: data });
 if (id) {
   SELECTED_ID = id;
   loadI18nForEntry(id).catch(console.error);
+  loadRelationsForEntry(id).catch(console.error);
+  updateRelationHint();
 }
 
 await refreshPublishedList();
@@ -454,6 +480,7 @@ function renderPublished(items) {
       if (!it) return;
       fillForm(it);
       loadI18nForEntry(it.id).catch(console.error);
+      loadRelationsForEntry(it.id).catch(console.error);
       setOutput({ selected: it.id });
     });
   });
@@ -484,9 +511,212 @@ function fillForm(it) {
   if ($("endYear")) $("endYear").value = it.endYear ?? "";
   if ($("sortYear")) $("sortYear").value = it.sortYear ?? "";
 
+  if ($("verdict")) $("verdict").value = it.verdict || "";
+  if ($("reality")) $("reality").value = it.reality || "";
+  if ($("realityChecked")) $("realityChecked").value = it.reality_checked || "";
+  if ($("sourceUrl")) $("sourceUrl").value = it.source_url || "";
+
   // Preview image
   const preview = $("imagePreview");
   if (preview) preview.src = it.imageUrl || "";
+
+  clearRelationDraft();
+  renderRelations(Array.isArray(it.relations) ? it.relations : []);
+  updateRelationHint();
+}
+
+/* =========================
+   WIRKUNGSLINIEN (RELATIONS)
+========================= */
+
+const RELATION_PHRASES = {
+  triggered_by: { out: "ausgelöst durch", in: "hat ausgelöst" },
+  influenced: { out: "beeinflusst", in: "beeinflusst von" },
+  implements: { out: "setzt um", in: "umgesetzt durch" },
+  contradicts: { out: "widerspricht", in: "wird widersprochen von" },
+};
+
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function relationPhrase(kind, direction) {
+  const e = RELATION_PHRASES[kind];
+  if (!e) return kind;
+  return e[direction] || kind;
+}
+
+function updateRelationHint() {
+  const hint = $("relHint");
+  if (!hint) return;
+  hint.textContent = SELECTED_ID
+    ? "Beziehungen dieses Eintrags. Neue Beziehung: Zieleintrag suchen, Art wählen, hinzufügen."
+    : "Erst speichern, dann Beziehungen anlegen.";
+}
+
+function clearRelationDraft() {
+  if ($("relTargetId")) $("relTargetId").value = "";
+  if ($("relSearch")) $("relSearch").value = "";
+  if ($("relSearchResults")) $("relSearchResults").innerHTML = "";
+  if ($("relTargetChosen")) $("relTargetChosen").textContent = "Kein Zieleintrag gewählt.";
+  if ($("relNote")) $("relNote").value = "";
+  if ($("relSourceUrl")) $("relSourceUrl").value = "";
+  if ($("relSourceChecked")) $("relSourceChecked").value = "";
+}
+
+function renderRelations(relations) {
+  const box = $("relList");
+  if (!box) return;
+
+  if (!SELECTED_ID) {
+    box.innerHTML = "<div style='opacity:.7'>—</div>";
+    return;
+  }
+  if (!relations || !relations.length) {
+    box.innerHTML = "<div style='opacity:.7'>Noch keine Wirkungslinien.</div>";
+    return;
+  }
+
+  box.innerHTML = relations
+    .map((r) => {
+      const phrase = relationPhrase(r.kind, r.direction);
+      const note = r.note ? ` — ${escHtml(r.note)}` : "";
+      const src = r.source_url ? ` [Beleg]` : "";
+      return `<div style="display:flex; gap:10px; align-items:flex-start; padding:6px 0; border-bottom:1px solid rgba(128,128,128,.2);">
+        <div style="flex:1;">
+          <div style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; opacity:.65;">${escHtml(phrase)}</div>
+          <div>${escHtml(r.other_title)} <span style="opacity:.6;">(${escHtml(r.other_type)})</span>${note}${src}</div>
+        </div>
+        <button class="btn btn--ghost" type="button" data-rel-del="${escHtml(r.id)}" style="padding:4px 8px;">Löschen</button>
+      </div>`;
+    })
+    .join("");
+
+  box.querySelectorAll("button[data-rel-del]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const id = b.getAttribute("data-rel-del");
+      if (!id) return;
+      if (!confirm("Diese Wirkungslinie löschen?")) return;
+      await deleteRelation(id);
+    });
+  });
+}
+
+function renderRelationSearch(matches) {
+  const box = $("relSearchResults");
+  if (!box) return;
+
+  if (!matches.length) {
+    box.innerHTML = "<div style='opacity:.7'>Kein Treffer.</div>";
+    return;
+  }
+
+  box.innerHTML = matches
+    .map(
+      (it) =>
+        `<button class="btn btn--ghost" type="button" data-rel-pick="${escHtml(it.id)}" style="display:block; width:100%; text-align:left; padding:6px 10px; margin-bottom:4px;">${escHtml(it.title)} <span style="opacity:.6;">(${escHtml(it.type)})</span></button>`
+    )
+    .join("");
+
+  box.querySelectorAll("button[data-rel-pick]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const id = b.getAttribute("data-rel-pick");
+      const it = ALL_ITEMS.find((x) => String(x.id) === String(id));
+      if (!it) return;
+      if ($("relTargetId")) $("relTargetId").value = it.id;
+      if ($("relTargetChosen"))
+        $("relTargetChosen").textContent = `Ziel: ${it.title} (${it.type})`;
+      if ($("relSearchResults")) $("relSearchResults").innerHTML = "";
+    });
+  });
+}
+
+const onRelationSearch = debounce(() => {
+  const q = ($("relSearch")?.value || "").trim().toLowerCase();
+  if (q.length < 2) {
+    if ($("relSearchResults")) $("relSearchResults").innerHTML = "";
+    return;
+  }
+  const matches = ALL_ITEMS.filter(
+    (it) => String(it.id) !== String(SELECTED_ID) && String(it.title || "").toLowerCase().includes(q)
+  ).slice(0, 12);
+  renderRelationSearch(matches);
+}, 200);
+
+async function addRelation() {
+  if (!RELATIONS_URL) await init();
+
+  if (!SELECTED_ID) return setOutput("Erst einen Eintrag speichern oder auswählen.");
+
+  const to_id = ($("relTargetId")?.value || "").trim();
+  if (!to_id) return setOutput("Kein Zieleintrag gewählt.");
+
+  const kind = ($("relKind")?.value || "").trim();
+  const token = requireAdminToken("Wirkungslinie anlegen");
+  if (!token) return setOutput("Abgebrochen (kein Token).");
+
+  const payload = {
+    from_id: SELECTED_ID,
+    to_id,
+    kind,
+    note: ($("relNote")?.value || "").trim(),
+    source_url: ($("relSourceUrl")?.value || "").trim(),
+    source_checked: ($("relSourceChecked")?.value || "").trim(),
+  };
+
+  const r = await fetch(RELATIONS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-admin-token": token },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) return setOutput(`Wirkungslinie fehlgeschlagen (${r.status}).\n${data?.error || ""}`);
+
+  setOutput({ ok: true, relation: data?.relation });
+  clearRelationDraft();
+  await loadRelationsForEntry(SELECTED_ID);
+}
+
+async function deleteRelation(relationId) {
+  if (!RELATIONS_URL) await init();
+
+  const token = requireAdminToken("Wirkungslinie löschen");
+  if (!token) return setOutput("Abgebrochen (kein Token).");
+
+  const u = new URL(RELATIONS_URL);
+  u.searchParams.set("id", relationId);
+
+  const r = await fetch(u.toString(), {
+    method: "DELETE",
+    headers: { "x-admin-token": token },
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) return setOutput(`Löschen fehlgeschlagen (${r.status}).\n${data?.error || ""}`);
+
+  setOutput({ ok: true, deleted: data?.deleted });
+  if (SELECTED_ID) await loadRelationsForEntry(SELECTED_ID);
+}
+
+async function loadRelationsForEntry(entryId) {
+  if (!RELATIONS_URL) await init();
+  if (!entryId) return renderRelations([]);
+
+  const u = new URL(RELATIONS_URL);
+  u.searchParams.set("item", entryId);
+
+  try {
+    const r = await fetch(u.toString(), { cache: "no-store" });
+    const data = await r.json().catch(() => ({}));
+    renderRelations(Array.isArray(data?.relations) ? data.relations : []);
+  } catch (e) {
+    renderRelations([]);
+  }
 }
 
 
@@ -643,6 +873,7 @@ async function refreshPublishedList() {
   const data = await r.json().catch(() => ({}));
   const items = Array.isArray(data?.items) ? data.items : [];
   renderPublished(items);
+  return items;
 }
 
 /* =========================
@@ -701,7 +932,36 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   const refreshBtn = $("refreshList");
-  if (refreshBtn) refreshBtn.addEventListener("click", refreshPublishedList);
+  if (refreshBtn) refreshBtn.addEventListener("click", async () => {
+    await refreshPublishedList();
+    await loadAllItems();
+  });
+
+  // --- Wirkungslinien ---
+  const relSearchInput = $("relSearch");
+  if (relSearchInput) relSearchInput.addEventListener("input", onRelationSearch);
+
+  const relKindSel = $("relKind");
+  if (relKindSel) {
+    const syncPhrase = () => {
+      const el = $("relKindPhrase");
+      if (el) el.textContent = relationPhrase(relKindSel.value, "out");
+    };
+    relKindSel.addEventListener("change", syncPhrase);
+    syncPhrase();
+  }
+
+  const relAddBtn = $("relAdd");
+  if (relAddBtn) relAddBtn.addEventListener("click", addRelation);
+
+  const relRefreshBtn = $("relRefresh");
+  if (relRefreshBtn) relRefreshBtn.addEventListener("click", async () => {
+    await loadAllItems();
+    if (SELECTED_ID) await loadRelationsForEntry(SELECTED_ID);
+    updateRelationHint();
+  });
+
+  updateRelationHint();
 
   // "OK / Publish" = create when nothing selected, otherwise update selected
   const publishBtn = $("publish");

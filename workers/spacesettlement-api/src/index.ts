@@ -1,12 +1,37 @@
 ﻿// src/index.ts
 
+import {
+  DEFAULT_SITE_ORIGIN,
+  renderItemPage,
+  renderItemNotFound,
+  renderRobots,
+  renderSitemap,
+  type ItemRow,
+  type Lang,
+  type RelationRow,
+} from "./render";
+
 export interface Env {
 DB: D1Database;
 IMAGES: R2Bucket;
 ADMIN_TOKEN?: string;
 OPENAI_API_KEY?: string;
 OPENAI_MODEL?: string;
+SITE_ORIGIN?: string;
 }
+
+const RELATION_KINDS = ["triggered_by", "influenced", "implements", "contradicts"] as const;
+
+const REALITY_VALUES = [
+  "in_operation",
+  "under_construction",
+  "funded",
+  "announced",
+  "dormant",
+  "abandoned",
+  "vision",
+  "fiction",
+] as const;
 
 type Item = {
 id: string;
@@ -70,6 +95,95 @@ if (v == null || v === "") return null;
 const n = Number(v);
 if (!Number.isFinite(n)) return null;
 return n;
+}
+
+function siteOrigin(env: Env): string {
+return (env.SITE_ORIGIN || "").trim().replace(/\/+$/, "") || DEFAULT_SITE_ORIGIN;
+}
+
+function html(body: string, status = 200, extraHeaders: Record<string, string> = {}) {
+return new Response(body, {
+status,
+headers: {
+"Content-Type": "text/html; charset=utf-8",
+"Cache-Control": "public, max-age=300",
+"X-Content-Type-Options": "nosniff",
+...extraHeaders,
+},
+});
+}
+
+function pickLang(url: URL, request: Request): Lang {
+const q = String(url.searchParams.get("lang") || "").trim().toLowerCase();
+if (q === "en") return "en";
+if (q === "de") return "de";
+const al = String(request.headers.get("accept-language") || "").toLowerCase();
+if (al.startsWith("en")) return "en";
+return "de";
+}
+
+// Nullbar machen: leerer String -> null, sonst getrimmter String.
+function nullableText(v: unknown): string | null {
+if (v == null) return null;
+const s = String(v).trim();
+return s === "" ? null : s;
+}
+
+function normalizeReality(v: unknown): string | null | undefined {
+const s = nullableText(v);
+if (s === null) return null;
+return (REALITY_VALUES as readonly string[]).includes(s) ? s : undefined;
+}
+
+// Alle Wirkungslinien eines Eintrags, aus dessen Sicht formuliert.
+async function relationsForItem(env: Env, itemId: string): Promise<RelationRow[]> {
+const rs = await env.DB.prepare(
+"SELECT r.id, r.from_id, r.to_id, r.kind, r.note, r.source_url, r.source_checked, r.created_at, " +
+"fi.title AS from_title, fi.type AS from_type, ti.title AS to_title, ti.type AS to_type " +
+"FROM relations r " +
+"JOIN items fi ON fi.id = r.from_id " +
+"JOIN items ti ON ti.id = r.to_id " +
+"WHERE r.from_id = ?1 OR r.to_id = ?1 " +
+"ORDER BY r.kind, r.created_at"
+)
+.bind(itemId)
+.all();
+
+return ((rs.results || []) as any[]).map((row) => toRelationRow(row, itemId));
+}
+
+function toRelationRow(row: any, viewFromId: string): RelationRow {
+const out = String(row.from_id) === String(viewFromId);
+return {
+id: String(row.id),
+from_id: String(row.from_id),
+to_id: String(row.to_id),
+kind: String(row.kind),
+note: row.note ?? null,
+source_url: row.source_url ?? null,
+source_checked: row.source_checked ?? null,
+created_at: row.created_at ?? null,
+direction: out ? "out" : "in",
+other_id: out ? String(row.to_id) : String(row.from_id),
+other_title: String(out ? row.to_title : row.from_title),
+other_type: String(out ? row.to_type : row.from_type),
+};
+}
+
+// Veröffentlichter i18n-Text eines Eintragsfeldes, sonst null.
+async function publishedI18n(
+env: Env,
+itemId: string,
+field: "title" | "summary",
+lang: Lang
+): Promise<string | null> {
+const row = await env.DB.prepare(
+"SELECT published FROM i18n_texts WHERE key = ? AND lang = ?"
+)
+.bind(`item.${itemId}.${field}`, lang)
+.first();
+const v = (row as any)?.published;
+return v == null || String(v).trim() === "" ? null : String(v);
 }
 
 function requireAdmin(request: Request, env: Env): Response | null {
@@ -271,6 +385,205 @@ headers: CORS_HEADERS,
 
 const url = new URL(request.url);
 const path = url.pathname;
+const ORIGIN = siteOrigin(env);
+
+// -----------------------
+// GET /item/<id>  (serverseitig gerendert, vollständiges HTML)
+// -----------------------
+if ((request.method === "GET" || request.method === "HEAD") && path.startsWith("/item/")) {
+const id = decodeURIComponent(path.slice("/item/".length)).replace(/\/+$/, "").trim();
+const lang = pickLang(url, request);
+
+if (!id || id.includes("/")) {
+return html(renderItemNotFound(lang), 404, { "Cache-Control": "no-store" });
+}
+
+const row = (await env.DB.prepare(
+"SELECT id, type, title, href, imageUrl, summary, tags, verdict, reality, reality_checked, source_url, startYear, endYear, createdAt " +
+"FROM items WHERE id = ?"
+)
+.bind(id)
+.first()) as ItemRow | null;
+
+if (!row) {
+return html(renderItemNotFound(lang), 404, { "Cache-Control": "no-store" });
+}
+
+const [relations, i18nTitle, i18nSummary] = await Promise.all([
+relationsForItem(env, id),
+publishedI18n(env, id, "title", lang),
+publishedI18n(env, id, "summary", lang),
+]);
+
+const body = renderItemPage({
+item: row,
+relations,
+lang,
+origin: ORIGIN,
+i18nTitle,
+i18nSummary,
+});
+
+if (request.method === "HEAD") {
+return new Response(null, {
+status: 200,
+headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" },
+});
+}
+return html(body, 200);
+}
+
+// -----------------------
+// GET /sitemap.xml
+// -----------------------
+if (request.method === "GET" && path === "/sitemap.xml") {
+const rs = await env.DB.prepare("SELECT id, createdAt FROM items ORDER BY createdAt DESC").all();
+const xml = renderSitemap((rs.results || []) as any[], ORIGIN);
+return new Response(xml, {
+status: 200,
+headers: {
+"Content-Type": "application/xml; charset=utf-8",
+"Cache-Control": "public, max-age=3600",
+},
+});
+}
+
+// -----------------------
+// GET /robots.txt
+// -----------------------
+if (request.method === "GET" && path === "/robots.txt") {
+return new Response(renderRobots(ORIGIN), {
+status: 200,
+headers: {
+"Content-Type": "text/plain; charset=utf-8",
+"Cache-Control": "public, max-age=3600",
+},
+});
+}
+
+// -----------------------
+// /relations
+// GET    öffentlich  — ?item=<id> | ?from=<id> | ?to=<id> | ?kind=<kind>
+// POST   Admin       — { from_id, to_id, kind, note?, source_url?, source_checked? }
+// PUT    Admin       — ?id=<relationId>, Body wie POST (Teilangaben erlaubt)
+// DELETE Admin       — ?id=<relationId>
+// -----------------------
+if (path === "/relations") {
+if (request.method === "GET") {
+const item = String(url.searchParams.get("item") || "").trim();
+const from = String(url.searchParams.get("from") || "").trim();
+const to = String(url.searchParams.get("to") || "").trim();
+const kind = String(url.searchParams.get("kind") || "").trim();
+
+if (item) {
+const rows = await relationsForItem(env, item);
+const filtered = kind ? rows.filter((r) => r.kind === kind) : rows;
+return json({ relations: filtered }, 200);
+}
+
+const conditions: string[] = [];
+const params: any[] = [];
+if (from) { conditions.push("r.from_id = ?"); params.push(from); }
+if (to) { conditions.push("r.to_id = ?"); params.push(to); }
+if (kind) { conditions.push("r.kind = ?"); params.push(kind); }
+
+let sql =
+"SELECT r.id, r.from_id, r.to_id, r.kind, r.note, r.source_url, r.source_checked, r.created_at, " +
+"fi.title AS from_title, fi.type AS from_type, ti.title AS to_title, ti.type AS to_type " +
+"FROM relations r " +
+"JOIN items fi ON fi.id = r.from_id " +
+"JOIN items ti ON ti.id = r.to_id";
+if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
+sql += " ORDER BY r.created_at DESC";
+
+const rs = await env.DB.prepare(sql).bind(...params).all();
+const relations = ((rs.results || []) as any[]).map((row) => toRelationRow(row, row.from_id));
+return json({ relations }, 200);
+}
+
+const guard = requireAdmin(request, env);
+if (guard) return guard;
+
+if (request.method === "POST") {
+let body: any;
+try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
+
+const from_id = String(body?.from_id || "").trim();
+const to_id = String(body?.to_id || "").trim();
+const kind = String(body?.kind || "").trim();
+
+if (!from_id) return json({ error: "Missing from_id" }, 400);
+if (!to_id) return json({ error: "Missing to_id" }, 400);
+if (from_id === to_id) return json({ error: "from_id and to_id must differ" }, 400);
+if (!(RELATION_KINDS as readonly string[]).includes(kind)) {
+return json({ error: "Invalid kind", allowed: RELATION_KINDS }, 400);
+}
+
+const fromRow = await env.DB.prepare("SELECT id FROM items WHERE id = ?").bind(from_id).first();
+if (!fromRow) return json({ error: "Unknown from_id" }, 400);
+const toRow = await env.DB.prepare("SELECT id FROM items WHERE id = ?").bind(to_id).first();
+if (!toRow) return json({ error: "Unknown to_id" }, 400);
+
+const id = crypto.randomUUID();
+try {
+await env.DB.prepare(
+"INSERT INTO relations (id, from_id, to_id, kind, note, source_url, source_checked) VALUES (?, ?, ?, ?, ?, ?, ?)"
+)
+.bind(id, from_id, to_id, kind, nullableText(body?.note), nullableText(body?.source_url), nullableText(body?.source_checked))
+.run();
+} catch (e: any) {
+const msg = String(e?.message || e);
+if (/UNIQUE/i.test(msg)) return json({ error: "Relation already exists" }, 409);
+throw e;
+}
+
+const created = await env.DB.prepare("SELECT * FROM relations WHERE id = ?").bind(id).first();
+return json({ ok: true, relation: created }, 200);
+}
+
+if (request.method === "PUT") {
+const id = String(url.searchParams.get("id") || "").trim();
+if (!id) return json({ error: "Missing id" }, 400);
+
+let body: any;
+try { body = await request.json(); } catch { return json({ error: "Invalid JSON body" }, 400); }
+
+const existing = await env.DB.prepare("SELECT * FROM relations WHERE id = ?").bind(id).first();
+if (!existing) return json({ error: "Not found" }, 404);
+
+const kind = body?.kind === undefined ? String((existing as any).kind) : String(body.kind).trim();
+if (!(RELATION_KINDS as readonly string[]).includes(kind)) {
+return json({ error: "Invalid kind", allowed: RELATION_KINDS }, 400);
+}
+
+const note = body?.note === undefined ? (existing as any).note : nullableText(body.note);
+const source_url = body?.source_url === undefined ? (existing as any).source_url : nullableText(body.source_url);
+const source_checked = body?.source_checked === undefined ? (existing as any).source_checked : nullableText(body.source_checked);
+
+try {
+await env.DB.prepare(
+"UPDATE relations SET kind = ?, note = ?, source_url = ?, source_checked = ? WHERE id = ?"
+)
+.bind(kind, note, source_url, source_checked, id)
+.run();
+} catch (e: any) {
+if (/UNIQUE/i.test(String(e?.message || e))) return json({ error: "Relation already exists" }, 409);
+throw e;
+}
+
+const updated = await env.DB.prepare("SELECT * FROM relations WHERE id = ?").bind(id).first();
+return json({ ok: true, relation: updated }, 200);
+}
+
+if (request.method === "DELETE") {
+const id = String(url.searchParams.get("id") || "").trim();
+if (!id) return json({ error: "Missing id" }, 400);
+await env.DB.prepare("DELETE FROM relations WHERE id = ?").bind(id).run();
+return json({ ok: true, deleted: id }, 200);
+}
+
+return json({ error: "Method not allowed" }, 405);
+}
 
 // -----------------------
 // i18n (public)
@@ -404,7 +717,8 @@ const fictionClass = url.searchParams.get("fiction_class");
 const topic = url.searchParams.get("topic");
 
 let sql =
-"SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt " +
+"SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt, " +
+"verdict, reality, reality_checked, source_url " +
 "FROM items";
 
 const conditions: string[] = [];
@@ -431,6 +745,24 @@ sql += " ORDER BY createdAt DESC";
 
 const rs = await env.DB.prepare(sql).bind(...params).all();
 
+// Wirkungslinien in einem Rutsch holen und den Einträgen zuordnen.
+const relRs = await env.DB.prepare(
+"SELECT r.id, r.from_id, r.to_id, r.kind, r.note, r.source_url, r.source_checked, r.created_at, " +
+"fi.title AS from_title, fi.type AS from_type, ti.title AS to_title, ti.type AS to_type " +
+"FROM relations r " +
+"JOIN items fi ON fi.id = r.from_id " +
+"JOIN items ti ON ti.id = r.to_id"
+).all();
+
+const relByItem = new Map<string, RelationRow[]>();
+for (const raw of (relRs.results || []) as any[]) {
+for (const owner of [String(raw.from_id), String(raw.to_id)]) {
+const list = relByItem.get(owner) || [];
+list.push(toRelationRow(raw, owner));
+relByItem.set(owner, list);
+}
+}
+
 const items = (rs.results || []).map((row: any) => ({
 id: row.id,
 type: row.type,
@@ -447,6 +779,11 @@ endYear: row.endYear ?? null,
 sortYear: row.sortYear ?? null,
 budgetBillionUSD: row.budgetBillionUSD ?? null,
 createdAt: row.createdAt ?? null,
+verdict: row.verdict ?? null,
+reality: row.reality ?? null,
+reality_checked: row.reality_checked ?? null,
+source_url: row.source_url ?? null,
+relations: relByItem.get(String(row.id)) || [],
 }));
 
 return json({ items }, 200);
@@ -495,9 +832,12 @@ budgetBillionUSD: normalizeFloat(body?.budgetBillionUSD),
 createdAt: now,
 };
 
+const newReality = normalizeReality(body?.reality);
+if (newReality === undefined) return json({ error: "Invalid reality", allowed: REALITY_VALUES }, 400);
+
 await env.DB.prepare(
-"INSERT INTO items (id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt) " +
-"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+"INSERT INTO items (id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt, verdict, reality, reality_checked, source_url) " +
+"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 .bind(
 item.id,
@@ -514,7 +854,11 @@ item.startYear,
 item.endYear,
 item.sortYear,
 item.budgetBillionUSD,
-item.createdAt
+item.createdAt,
+nullableText(body?.verdict),
+newReality,
+nullableText(body?.reality_checked),
+nullableText(body?.source_url)
 )
 .run();
 
@@ -564,8 +908,12 @@ const title = String(body?.title || "").trim();
 if (!type) return json({ error: "Missing type" }, 400);
 if (!title) return json({ error: "Missing title" }, 400);
 
+const putReality = normalizeReality(body?.reality);
+if (putReality === undefined) return json({ error: "Invalid reality", allowed: REALITY_VALUES }, 400);
+
 await env.DB.prepare(
-"UPDATE items SET type = ?, title = ?, href = ?, imageUrl = ?, summary = ?, tags = ?, meta = ?, project_class = ?, fiction_class = ?, startYear = ?, endYear = ?, sortYear = ?, budgetBillionUSD = ?, createdAt = ? WHERE id = ?"
+"UPDATE items SET type = ?, title = ?, href = ?, imageUrl = ?, summary = ?, tags = ?, meta = ?, project_class = ?, fiction_class = ?, startYear = ?, endYear = ?, sortYear = ?, budgetBillionUSD = ?, createdAt = ?, " +
+"verdict = ?, reality = ?, reality_checked = ?, source_url = ? WHERE id = ?"
 )
 .bind(
 type,
@@ -586,12 +934,16 @@ normalizeInt(body?.endYear),
 normalizeInt(body?.sortYear),
 normalizeFloat(body?.budgetBillionUSD),
 now,
+nullableText(body?.verdict),
+putReality,
+nullableText(body?.reality_checked),
+nullableText(body?.source_url),
 id
 )
 .run();
 
 const row = await env.DB.prepare(
-"SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt FROM items WHERE id = ?"
+"SELECT id, type, title, href, imageUrl, summary, tags, meta, project_class, fiction_class, startYear, endYear, sortYear, budgetBillionUSD, createdAt, verdict, reality, reality_checked, source_url FROM items WHERE id = ?"
 )
 .bind(id)
 .first();
@@ -636,6 +988,10 @@ endYear: (row as any).endYear ?? null,
 sortYear: (row as any).sortYear ?? null,
 budgetBillionUSD: (row as any).budgetBillionUSD ?? null,
 createdAt: (row as any).createdAt ?? null,
+verdict: (row as any).verdict ?? null,
+reality: (row as any).reality ?? null,
+reality_checked: (row as any).reality_checked ?? null,
+source_url: (row as any).source_url ?? null,
 },
 },
 200
