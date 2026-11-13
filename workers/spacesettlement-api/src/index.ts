@@ -114,12 +114,11 @@ headers: {
 }
 
 function pickLang(url: URL, request: Request): Lang {
+// Die Sprache kommt nur aus der Adresse. So ist jede URL eindeutig cachebar
+// und passt zu canonical/hreflang (Deutsch ist x-default).
+void request;
 const q = String(url.searchParams.get("lang") || "").trim().toLowerCase();
-if (q === "en") return "en";
-if (q === "de") return "de";
-const al = String(request.headers.get("accept-language") || "").toLowerCase();
-if (al.startsWith("en")) return "en";
-return "de";
+return q === "en" ? "en" : "de";
 }
 
 // Nullbar machen: leerer String -> null, sonst getrimmter String.
@@ -168,6 +167,13 @@ other_id: out ? String(row.to_id) : String(row.from_id),
 other_title: String(out ? row.to_title : row.from_title),
 other_type: String(out ? row.to_type : row.from_type),
 };
+}
+
+// Titel der jeweils anderen Einträge in der Seitensprache, mit Rückfall auf den Basistitel.
+async function localizeRelationTitles(env: Env, rels: RelationRow[], lang: Lang): Promise<RelationRow[]> {
+if (lang === "de" || !rels.length) return rels;
+const titles = await Promise.all(rels.map((r) => publishedI18n(env, r.other_id, "title", lang)));
+return rels.map((r, i) => (titles[i] ? { ...r, other_title: titles[i] as string } : r));
 }
 
 // Veröffentlichter i18n-Text eines Eintragsfeldes, sonst null.
@@ -410,7 +416,7 @@ return html(renderItemNotFound(lang), 404, { "Cache-Control": "no-store" });
 }
 
 const [relations, i18nTitle, i18nSummary] = await Promise.all([
-relationsForItem(env, id),
+relationsForItem(env, id).then((rels) => localizeRelationTitles(env, rels, lang)),
 publishedI18n(env, id, "title", lang),
 publishedI18n(env, id, "summary", lang),
 ]);

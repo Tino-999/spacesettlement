@@ -452,12 +452,14 @@ export function renderSitemap(
       ? `\n    <lastmod>${esc(lastmod.slice(0, 10))}</lastmod>`
       : "";
 
-    urls.push(
-      `  <url>\n    <loc>${esc(de)}</loc>${lastmodTag}\n` +
-        `    <xhtml:link rel="alternate" hreflang="de" href="${esc(de)}" />\n` +
-        `    <xhtml:link rel="alternate" hreflang="en" href="${esc(en)}" />\n` +
-        `    <xhtml:link rel="alternate" hreflang="x-default" href="${esc(de)}" />\n  </url>`
-    );
+    // Je Sprachfassung ein eigener <url>-Eintrag mit dem vollständigen Satz an Alternativen.
+    const alternates =
+      `    <xhtml:link rel="alternate" hreflang="de" href="${esc(de)}" />\n` +
+      `    <xhtml:link rel="alternate" hreflang="en" href="${esc(en)}" />\n` +
+      `    <xhtml:link rel="alternate" hreflang="x-default" href="${esc(de)}" />\n`;
+    for (const loc of [de, en]) {
+      urls.push(`  <url>\n    <loc>${esc(loc)}</loc>${lastmodTag}\n` + alternates + `  </url>`);
+    }
   }
 
   return (
