@@ -158,6 +158,74 @@
               </div>
             </div>
 
+            <!-- URTEIL / REALITÄTSGRAD / BELEG -->
+            <div class="admin-judgment" style="margin-top:18px; padding-top:14px; border-top:1px solid rgba(128,128,128,.25);">
+              <div class="card__kicker">Urteil &amp; Realität</div>
+
+              <label>Urteil (wertend, erscheint auf der Einzelseite)</label>
+              <textarea id="verdict" class="input" rows="3" placeholder="Was dieser Eintrag wirklich bedeutet."></textarea>
+
+              <label>Realitätsgrad</label>
+              <select id="reality" class="input">
+                <option value="">— nicht gesetzt —</option>
+                <option value="in_operation">in Betrieb (in_operation)</option>
+                <option value="under_construction">im Bau (under_construction)</option>
+                <option value="funded">finanziert (funded)</option>
+                <option value="announced">angekündigt (announced)</option>
+                <option value="dormant">ruhend (dormant)</option>
+                <option value="abandoned">aufgegeben (abandoned)</option>
+                <option value="vision">Vision (vision)</option>
+                <option value="fiction">Fiktion (fiction)</option>
+              </select>
+
+              <label>Prüfdatum (YYYY-MM-DD)</label>
+              <input id="realityChecked" class="input" type="date" />
+
+              <label>Beleg (URL)</label>
+              <input id="sourceUrl" class="input" placeholder="https://…" />
+            </div>
+
+            <!-- WIRKUNGSLINIEN -->
+            <div class="admin-relations" style="margin-top:18px; padding-top:14px; border-top:1px solid rgba(128,128,128,.25);">
+              <div class="card__kicker">Wirkungslinien</div>
+              <div class="muted" id="relHint" style="margin-bottom:10px;">
+                Erst speichern, dann Beziehungen anlegen.
+              </div>
+
+              <div id="relList" class="code" style="white-space:normal; margin-bottom:12px;"></div>
+
+              <label>Zieleintrag suchen</label>
+              <input id="relSearch" class="input" placeholder="Titel tippen …" autocomplete="off" />
+              <div id="relSearchResults" class="code" style="white-space:normal; margin-top:6px;"></div>
+              <div id="relTargetChosen" class="muted" style="margin-top:6px;">Kein Zieleintrag gewählt.</div>
+              <input id="relTargetId" type="hidden" />
+
+              <label style="margin-top:10px;">Art der Beziehung</label>
+              <select id="relKind" class="input">
+                <option value="influenced">beeinflusst (influenced)</option>
+                <option value="triggered_by">ausgelöst durch (triggered_by)</option>
+                <option value="implements">setzt um (implements)</option>
+                <option value="contradicts">widerspricht (contradicts)</option>
+              </select>
+              <div class="muted" style="margin-top:6px;">
+                Gelesen als: <em>dieser Eintrag</em> → <span id="relKindPhrase">beeinflusst</span> → <em>Zieleintrag</em>.
+              </div>
+
+              <label style="margin-top:10px;">Notiz (optional)</label>
+              <input id="relNote" class="input" placeholder="Woran genau hängt die Wirkung?" />
+
+              <label>Beleg für die Beziehung (URL, optional)</label>
+              <input id="relSourceUrl" class="input" placeholder="https://…" />
+
+              <label>Beleg geprüft am (optional)</label>
+              <input id="relSourceChecked" class="input" type="date" />
+
+              <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+                <button id="relAdd" class="btn" type="button">Wirkungslinie hinzufügen</button>
+                <button id="relRefresh" class="btn btn--ghost" type="button">Neu laden</button>
+              </div>
+            </div>
+
             <label>Tags (comma separated)</label>
             <input id="tags" class="input" placeholder="habitats, infrastructure" />
 
